@@ -1,0 +1,6 @@
+/target
+/doc
+Cargo.lock
+.DS_Store
+.env
+*.md

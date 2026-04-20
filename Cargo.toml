@@ -1,0 +1,50 @@
+[package]
+name = "decrypt-btc"
+version = "0.1.0"
+edition = "2021"
+description = "BTC mnemonic brute-force tool with GPU acceleration"
+authors = ["Your Name"]
+
+[dependencies]
+# 序列化与配置
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "1.0"
+
+# OpenCL GPU加速
+ocl = "0.19"
+
+# 加密算法
+sha2 = "0.10"
+pbkdf2 = "0.12"
+secp256k1 = { version = "0.27", features = ["std"] }
+ripemd = "0.1"
+hmac = "0.12"
+
+# BIP标准库 - 使用最简单直接的方案
+bitcoin = "0.30"
+bip39 = { version = "2.0", features = ["rand"] }
+bs58 = { version = "0.5", features = ["check"] }
+
+# 编码
+base58check = "0.1"
+hex = "0.4"
+
+# 命令行与日志
+clap = { version = "4.0", features = ["derive"] }
+log = "0.4"
+env_logger = "0.10"
+
+# 环境变量
+dotenv = "0.15"
+
+# 测试工具
+rand = "0.8"
+
+[dev-dependencies]
+rand = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
