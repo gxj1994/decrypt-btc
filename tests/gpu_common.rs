@@ -1,6 +1,8 @@
 // GPU测试公共工具模块
 // 用于准备GPU测试数据、验证GPU计算结果、运行测试
 
+#![allow(dead_code)] // 这是公共测试工具模块，部分函数可能被其他测试模块使用
+
 use decrypt_btc::address::mnemonic_to_address;
 use decrypt_btc::config::Config;
 use std::collections::HashMap;
@@ -262,7 +264,19 @@ pub fn run_gpu_search_test(config: &Config, test_name: &str, should_find: bool) 
         .expect("GPU搜索器初始化失败");
     let results = searcher.search(config).expect("GPU搜索失败");
     
-    println!("[GPU结果] 找到 {} 个匹配", results.len());
+    // 显示性能统计
+    let stats = &searcher.stats;
+    println!("\n[GPU性能统计]");
+    println!("总尝试次数: {} 次", stats.total_attempts);
+    println!("GPU执行时间: {:.3} 秒", stats.execution_secs);
+    println!("搜索速度: {:.0} H/s", stats.attempts_per_second);
+    if stats.attempts_per_second > 1000.0 && stats.attempts_per_second < 1000000.0 {
+        println!("搜索速度: {:.2} KH/s", stats.attempts_per_second / 1000.0);
+    } else if stats.attempts_per_second >= 1000000.0 {
+        println!("搜索速度: {:.2} MH/s", stats.attempts_per_second / 1000000.0);
+    }
+    
+    println!("\n[GPU结果] 找到 {} 个匹配", results.len());
     
     if should_find {
         assert!(!results.is_empty(), "GPU应该找到匹配");

@@ -14,19 +14,28 @@ pub struct GpuSearchResult {
     pub work_item_index: u32,
 }
 
+/// GPU搜索性能统计
+#[derive(Debug, Clone)]
+pub struct GpuSearchStats {
+    pub total_attempts: u64,        // 总尝试次数
+    pub elapsed_secs: f64,          // 总耗时（秒）
+    pub attempts_per_second: f64,   // 每秒尝试次数
+    pub kernel_compile_secs: f64,   // 内核编译耗时
+    pub execution_secs: f64,        // GPU执行耗时
+}
+
 /// GPU搜索器
 pub struct GpuSearcher {
-    context: Context,
     queue: Queue,
-    program: Program,
     kernel: Kernel,
     word_indices_buffer: Buffer<u32>,
     target_hash_buffer: Buffer<u8>,
     salt_buffer: Buffer<u8>,              // 预计算的salt缓冲区
     result_buffer: Buffer<u32>,
-    flag_buffer: Buffer<i32>,
+    flag_buffer: Buffer<u32>,             // 统计计数器（改为u32类型）
     mnemonic_size: usize,
     salt_len: u32,                        // salt长度
+    pub stats: GpuSearchStats,            // 性能统计
 }
 
 impl GpuSearcher {
@@ -123,14 +132,6 @@ impl GpuSearcher {
         // 4. 预计算目标哈希（优化：在初始化时上传，避免每次search重复上传）
         let target_hash = Self::decode_target_address_static(&config.target_address)?;
         info!("[GPU] 目标哈希已预计算: {:?}", &target_hash[..8]);
-        
-        // 创建缓冲区
-        let config_size = 1024; // 配置缓冲区大小
-        let config_buffer = Buffer::<u8>::builder()
-            .queue(queue.clone())
-            .flags(ocl::flags::MEM_READ_ONLY)
-            .len(config_size)
-            .build()?;
 
         let result_size = 1024; // 结果缓冲区大小
         let result_buffer = Buffer::<u32>::builder()
@@ -143,11 +144,15 @@ impl GpuSearcher {
         let initial_result = vec![0u32; result_size];
         result_buffer.write(&initial_result).enq()?;
 
-        let flag_buffer = Buffer::<i32>::builder()
+        let flag_buffer = Buffer::<u32>::builder()
             .queue(queue.clone())
             .flags(ocl::flags::MEM_READ_WRITE)
             .len(1)
             .build()?;
+        
+        // 初始化统计计数器为0
+        let initial_stats: Vec<u32> = vec![0];
+        flag_buffer.write(&initial_stats).enq()?;
 
         // 创建word_indices缓冲区（足够大的空间，支持干扰词场景）
         let word_indices_buffer = Buffer::<u32>::builder()
@@ -174,9 +179,6 @@ impl GpuSearcher {
             .len(256)
             .build()?;
 
-        // 初始化标志为0
-        let initial_flag: Vec<i32> = vec![0];
-        flag_buffer.write(&initial_flag).enq()?;
 
         // 5. 创建内核（6个参数）
         let kernel = Kernel::builder()
@@ -195,9 +197,7 @@ impl GpuSearcher {
         info!("[GPU] GPU搜索器初始化完成");
 
         Ok(Self {
-            context,
             queue,
-            program,
             kernel,
             word_indices_buffer,
             target_hash_buffer,
@@ -206,6 +206,13 @@ impl GpuSearcher {
             flag_buffer,
             mnemonic_size,
             salt_len: 0,
+            stats: GpuSearchStats {
+                total_attempts: 0,
+                elapsed_secs: 0.0,
+                attempts_per_second: 0.0,
+                kernel_compile_secs: 0.0,
+                execution_secs: 0.0,
+            },
         })
     }
 
@@ -270,7 +277,10 @@ impl GpuSearcher {
         &mut self,
         config: &Config,
     ) -> Result<Vec<GpuSearchResult>, Box<dyn std::error::Error>> {
+        use std::time::Instant;
+        
         info!("[GPU] 开始搜索...");
+        let search_start = Instant::now();
 
         // 1. 准备助记词索引数据
         let word_indices = self.prepare_word_indices(config)?;
@@ -313,10 +323,11 @@ impl GpuSearcher {
         self.kernel.set_arg(2, &self.salt_buffer)?;
         self.kernel.set_arg(3, &self.salt_len)?;
         self.kernel.set_arg(4, &self.result_buffer)?;
-        self.kernel.set_arg(5, &self.flag_buffer)?;
+        self.kernel.set_arg(5, &self.flag_buffer)?; // stats_counter
 
         // 8. 启动内核
         let global_work_size = SpatialDims::One(work_items);
+        let kernel_start = Instant::now();
         unsafe {
             self.kernel.cmd().global_work_size(global_work_size).enq()?;
         }
@@ -324,19 +335,22 @@ impl GpuSearcher {
 
         // 5. 等待完成
         self.queue.finish()?;
-        info!("[GPU] 内核执行完成");
+        let kernel_elapsed = kernel_start.elapsed().as_secs_f64();
+        info!("[GPU] 内核执行完成，耗时: {:.3}秒", kernel_elapsed);
 
         // 7. 读取结果
         let mut result_data = vec![0u32; 1024];
         self.result_buffer.read(&mut result_data).enq()?;
         self.queue.finish()?;
 
-        // 8. 读取标志
-        let mut flag_data = vec![0i32; 1];
-        self.flag_buffer.read(&mut flag_data).enq()?;
+        // 8. 读取统计计数器
+        let mut stats_data = vec![0u32; 1];
+        self.flag_buffer.read(&mut stats_data).enq()?;
         self.queue.finish()?;
+        
+        let total_attempts = stats_data[0] as u64;
+        info!("[GPU] 总尝试次数: {}", total_attempts);
 
-        info!("[GPU] 找到标志: {}", flag_data[0]);
         info!(
             "[GPU] 结果缓冲区（DEBUG）: magic={:#X}, pubkey_hash={:?}, word_indices={:?}",
             result_data[0],
@@ -344,34 +358,40 @@ impl GpuSearcher {
             &result_data[21..33]
         );
 
-        // 8. 解析结果
+        // 9. 解析结果
         let results = self.parse_results(&result_data, config)?;
         info!("[GPU] 找到匹配: {} 个", results.len());
+        
+        // 10. 计算性能统计
+        let total_elapsed = search_start.elapsed().as_secs_f64();
+        let aps = if total_elapsed > 0.0 {
+            total_attempts as f64 / total_elapsed
+        } else {
+            0.0
+        };
+        
+        self.stats = GpuSearchStats {
+            total_attempts,
+            elapsed_secs: total_elapsed,
+            attempts_per_second: aps,
+            kernel_compile_secs: 0.0, // 编译时间在初始化时已完成
+            execution_secs: kernel_elapsed,
+        };
+        
+        info!("[GPU] ========== 性能统计 ==========");
+        info!("[GPU] 总尝试次数: {}", total_attempts);
+        info!("[GPU] 总耗时: {:.3} 秒", total_elapsed);
+        info!("[GPU] GPU执行时间: {:.3} 秒", kernel_elapsed);
+        info!("[GPU] 速度: {:.0} H/s (attempts/second)", aps);
+        if aps > 1000.0 {
+            info!("[GPU] 速度: {:.2} KH/s", aps / 1000.0);
+        }
+        if aps > 1000000.0 {
+            info!("[GPU] 速度: {:.2} MH/s", aps / 1000000.0);
+        }
+        info!("[GPU] =====================================");
 
         Ok(results)
-    }
-
-    /// 准备配置数据
-    fn prepare_config_data(&self, config: &Config) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let mut data = Vec::new();
-
-        // 助记词大小 (4 bytes)
-        data.extend_from_slice(&(config.mnemonic_size as u32).to_le_bytes());
-
-        // 候选词数量 (4 bytes)
-        let total_candidates: u32 = config.word_positions.values().map(|v| v.len() as u32).sum();
-        data.extend_from_slice(&total_candidates.to_le_bytes());
-
-        // 目标地址哈希 (20 bytes) - 简化处理
-        let target_hash = self.decode_target_address(&config.target_address)?;
-        data.extend_from_slice(&target_hash);
-
-        // 填充到1024字节
-        while data.len() < 1024 {
-            data.push(0);
-        }
-
-        Ok(data[..1024].to_vec())
     }
 
     /// 解码目标地址为哈希（静态方法，用于初始化时预计算）
@@ -394,11 +414,6 @@ impl GpuSearcher {
             &pubkey_hash[..8]
         );
         Ok(pubkey_hash)
-    }
-    
-    /// 解码目标地址为哈希
-    fn decode_target_address(&self, address: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        Self::decode_target_address_static(address)
     }
 
     /// 准备助记词索引数组

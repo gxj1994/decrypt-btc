@@ -56,8 +56,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         search_space as f64
     );
 
-    // TODO: Initialize OpenCL and run GPU search
-
     if args.gpu {
         // GPU search mode
         info!("\n[Mode] GPU accelerated search");
@@ -131,17 +129,45 @@ fn run_cpu_verification_test(
 /// GPU搜索模式
 fn run_gpu_search(
     config: &Config,
-    candidates: &[Vec<u16>],
+    _candidates: &[Vec<u16>],
     _batch_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use std::time::Instant;
+    
     info!("\n初始化GPU搜索器...");
+    let init_start = Instant::now();
 
     // 创建GPU搜索器
     let mut searcher = GpuSearcher::new(config)?;
+    let init_elapsed = init_start.elapsed().as_secs_f64();
+    info!("GPU搜索器初始化完成，耗时: {:.3}秒", init_elapsed);
 
     // 执行GPU搜索
     info!("\n开始GPU搜索...");
     let results = searcher.search(config)?;
+
+    // 输出性能统计
+    let stats = &searcher.stats;
+    info!("\n{}", "=".repeat(60));
+    info!("GPU搜索性能报告");
+    info!("{}", "=".repeat(60));
+    info!("初始化时间: {:.3} 秒", init_elapsed);
+    info!("GPU执行时间: {:.3} 秒", stats.execution_secs);
+    info!("总耗时: {:.3} 秒", stats.elapsed_secs);
+    info!("总尝试次数: {} 次", stats.total_attempts);
+    info!("搜索速度: {:.0} H/s", stats.attempts_per_second);
+    
+    if stats.attempts_per_second > 1000.0 && stats.attempts_per_second < 1000000.0 {
+        info!("搜索速度: {:.2} KH/s", stats.attempts_per_second / 1000.0);
+    } else if stats.attempts_per_second >= 1000000.0 {
+        info!("搜索速度: {:.2} MH/s", stats.attempts_per_second / 1000000.0);
+    }
+    
+    if stats.total_attempts > 0 && stats.execution_secs > 0.0 {
+        let avg_time_per_attempt = stats.execution_secs * 1_000_000_000.0 / stats.total_attempts as f64;
+        info!("平均每次尝试: {:.0} 纳秒", avg_time_per_attempt);
+    }
+    info!("{}", "=".repeat(60));
 
     // 输出结果
     if results.is_empty() {

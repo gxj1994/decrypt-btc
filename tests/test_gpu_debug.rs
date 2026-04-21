@@ -169,7 +169,7 @@ fn gpu_debug_compute(
         public_key,
         sha256_result,
         pubkey_hash,
-        address_bytes,
+        _address_bytes: address_bytes,
     })
 }
 
@@ -181,7 +181,7 @@ struct GpuDebugOutput {
     public_key: Vec<u8>,
     sha256_result: Vec<u8>,
     pubkey_hash: Vec<u8>,
-    address_bytes: Vec<u8>,
+    _address_bytes: Vec<u8>, // 保留用于未来调试
 }
 
 #[cfg(test)]

@@ -1,8 +1,6 @@
 // GPU性能测试工具
 // 用于测试和优化GPU内核性能
 
-use std::time::Instant;
-
 /// 性能测试结果
 #[derive(Debug, Clone)]
 pub struct PerformanceResult {
@@ -106,41 +104,6 @@ fn _test_single_batch_size(
 ) -> Result<PerformanceResult, Box<dyn std::error::Error>> {
     // 此函数已被废弃，请使用集成测试
     Err("此函数已废弃，请使用 tests/ 目录中的集成测试".into())
-}
-
-/// 打印对比表
-fn print_comparison_table(results: &[PerformanceResult]) {
-    println!("\n{}", "=".repeat(80));
-    println!("  性能对比表");
-    println!("{}", "=".repeat(80));
-
-    println!(
-        "\n  {:<15} {:>15} {:>15} {:>15} {:>15}",
-        "批次大小", "总尝试次数", "总耗时(秒)", "速度(H/s)", "加速比"
-    );
-    println!("{}", "-".repeat(75));
-
-    let baseline = results[0].attempts_per_second;
-
-    for result in results {
-        // 从批次大小推断（这里简化处理）
-        let batch_size = 0; // TODO: 需要从结果中获取
-
-        let speedup = if baseline > 0.0 {
-            result.attempts_per_second / baseline
-        } else {
-            1.0
-        };
-
-        println!(
-            "  {:<15} {:>15} {:>15.3} {:>15.0} {:>15.2}x",
-            batch_size,
-            result.total_attempts,
-            result.elapsed_secs,
-            result.attempts_per_second,
-            speedup
-        );
-    }
 }
 
 /// 打印优化建议
