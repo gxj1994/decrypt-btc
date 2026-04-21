@@ -1,9 +1,8 @@
 use clap::Parser;
 use log::info;
 
-use decrypt_btc::address::mnemonic_to_address;
 use decrypt_btc::config::Config;
-use decrypt_btc::mnemonic::{indices_to_mnemonic, Bip39Wordlist, CandidateGenerator};
+use decrypt_btc::mnemonic::{Bip39Wordlist, CandidateGenerator};
 use decrypt_btc::opencl::gpu_searcher::GpuSearcher;
 
 #[derive(Parser, Debug)]
@@ -16,13 +15,14 @@ struct Args {
     #[arg(short, long, default_value = "config/example.yaml")]
     config: String,
 
-    /// Use GPU search
-    #[arg(short, long)]
-    gpu: bool,
-
     /// GPU batch size
     #[arg(long, default_value = "10000")]
     batch_size: usize,
+
+    /// Maximum search space limit (default: 5,000,000)
+    /// If calculated search space exceeds this, the program will warn and exit
+    #[arg(long, default_value = "5000000")]
+    max_search_space: u64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,91 +56,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         search_space as f64
     );
 
-    if args.gpu {
-        // GPU search mode
-        info!("\n[Mode] GPU accelerated search");
-        run_gpu_search(&config, &candidates, args.batch_size)?;
-    } else if cfg!(debug_assertions) {
-        // CPU verification test (development)
-        info!("\n[Mode] CPU verification test");
-        run_cpu_verification_test(&generator, &config)?;
-    } else {
-        info!("\nReady for GPU search. Use --gpu flag to enable.");
+    // 检查搜索空间是否超过限制
+    if search_space > args.max_search_space {
+        log::error!("❌ 搜索空间过大！");
+        log::error!("   计算得到的搜索空间: {:.2e}", search_space as f64);
+        log::error!(
+            "   允许的最大搜索空间: {:.2e}",
+            args.max_search_space as f64
+        );
+        log::error!(
+            "   超出倍数: {:.1}x",
+            search_space as f64 / args.max_search_space as f64
+        );
+        log::error!("");
+        log::error!("请缩小候选词范围，或使用 --max-search-space 参数调整限制");
+        log::error!("示例: decrypt-btc --gpu --max-search-space 10000000");
+        return Err("搜索空间超过限制，程序退出".into());
     }
 
-    Ok(())
-}
+    if search_space > 1_000_000 {
+        log::warn!("⚠️  搜索空间较大: {:.2e} 组合", search_space as f64);
+        log::warn!("   预计需要较长时间，请耐心等待");
+    }
 
-/// CPU验证测试（for development）
-fn run_cpu_verification_test(
-    generator: &CandidateGenerator,
-    config: &Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // 构建候选词
-    let candidates = generator.build_candidates(config)?;
-    let search_space = CandidateGenerator::calculate_search_space(&candidates);
-    
-    info!("CPU测试：搜索空间 = {:.2e} 组合", search_space as f64);
-    
-    // 如果搜索空间太大，只测试前几个组合
-    let max_test_count = 10;
-    if search_space > max_test_count as u64 {
-        info!("搜索空间过大，只测试前 {} 个组合", max_test_count);
-    }
-    
-    // 生成要测试的索引组合
-    let mut test_count = 0;
-    let mut indices = vec![0usize; config.mnemonic_size];
-    
-    loop {
-        if test_count >= max_test_count {
-            break;
-        }
-        
-        // 将indices转换为助记词
-        let mnemonic_indices: Vec<u16> = indices.iter().map(|&i| i as u16).collect();
-        let mnemonic = indices_to_mnemonic(&mnemonic_indices, generator.wordlist())?;
-        
-        info!("\n测试 [{}/{}]: {}", test_count + 1, max_test_count.min(search_space as usize), mnemonic);
-        
-        // 测试所有密码
-        let passwords = if config.passwords.is_empty() {
-            vec!["".to_string()]
-        } else {
-            config.passwords.clone()
-        };
-        
-        for password in &passwords {
-            let address = mnemonic_to_address(&mnemonic, password)?;
-            info!("  Password: '{}' -> Address: {}", password, address);
-            
-            if address == config.target_address {
-                info!("\n*** MATCH FOUND! ***");
-                info!("Mnemonic: {}", mnemonic);
-                info!("Password: {}", password);
-                return Ok(());
-            }
-        }
-        
-        // 生成下一个索引组合
-        test_count += 1;
-        let mut pos = config.mnemonic_size - 1;
-        while pos < config.mnemonic_size {
-            indices[pos] += 1;
-            if indices[pos] < candidates[pos].len() {
-                break;
-            }
-            indices[pos] = 0;
-            if pos == 0 {
-                // 已经遍历完所有组合
-                info!("\n已遍历完所有 {} 个组合", test_count);
-                return Ok(());
-            }
-            pos -= 1;
-        }
-    }
-    
-    info!("\nCPU测试完成，未找到匹配");
+    // 自动检测GPU并执行搜索
+    info!("\n[Mode] GPU accelerated search");
+    run_gpu_search(&config, &candidates, args.batch_size)?;
+
     Ok(())
 }
 
@@ -151,7 +93,7 @@ fn run_gpu_search(
     _batch_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::time::Instant;
-    
+
     info!("\n初始化GPU搜索器...");
     let init_start = Instant::now();
 
@@ -174,15 +116,19 @@ fn run_gpu_search(
     info!("总耗时: {:.3} 秒", stats.elapsed_secs);
     info!("总尝试次数: {} 次", stats.total_attempts);
     info!("搜索速度: {:.0} H/s", stats.attempts_per_second);
-    
+
     if stats.attempts_per_second > 1000.0 && stats.attempts_per_second < 1000000.0 {
         info!("搜索速度: {:.2} KH/s", stats.attempts_per_second / 1000.0);
     } else if stats.attempts_per_second >= 1000000.0 {
-        info!("搜索速度: {:.2} MH/s", stats.attempts_per_second / 1000000.0);
+        info!(
+            "搜索速度: {:.2} MH/s",
+            stats.attempts_per_second / 1000000.0
+        );
     }
-    
+
     if stats.total_attempts > 0 && stats.execution_secs > 0.0 {
-        let avg_time_per_attempt = stats.execution_secs * 1_000_000_000.0 / stats.total_attempts as f64;
+        let avg_time_per_attempt =
+            stats.execution_secs * 1_000_000_000.0 / stats.total_attempts as f64;
         info!("平均每次尝试: {:.0} 纳秒", avg_time_per_attempt);
     }
     info!("{}", "=".repeat(60));

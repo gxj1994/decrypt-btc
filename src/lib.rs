@@ -4,7 +4,6 @@
 
 pub mod address;
 pub mod config;
-pub mod crypto;
 pub mod mnemonic;
 pub mod opencl;
 pub mod performance;
