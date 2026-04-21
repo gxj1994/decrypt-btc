@@ -19,7 +19,7 @@ fn test_performance_stats_basic() {
 
     // 设置简单的助记词位置（只有1个组合）
     for i in 1..=12 {
-        config.word_positions.insert(format!("position_{}", i), vec!["abandon".to_string()]);
+        config.word_positions.insert(format!("word{}", i - 1), vec!["abandon".to_string()]);
     }
 
     // 创建GPU搜索器
@@ -67,9 +67,9 @@ fn test_performance_stats_multiple_work_items() {
     // 前4个位置有2个候选词，其他位置只有1个
     for i in 1..=12 {
         if i <= 4 {
-            config.word_positions.insert(format!("position_{}", i), test_words.clone());
+            config.word_positions.insert(format!("word{}", i - 1), test_words.clone());
         } else {
-            config.word_positions.insert(format!("position_{}", i), vec!["abandon".to_string()]);
+            config.word_positions.insert(format!("word{}", i - 1), vec!["abandon".to_string()]);
         }
     }
 

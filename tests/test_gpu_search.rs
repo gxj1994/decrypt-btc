@@ -14,7 +14,7 @@ fn test_gpu_simple_search() {
     // 构建完整助记词
     let mut mnemonic_parts = Vec::new();
     for i in 1..=config.mnemonic_size {
-        let key = format!("position_{}", i);
+        let key = format!("word{}", i - 1);
         if let Some(words) = config.word_positions.get(&key) {
             mnemonic_parts.push(words[0].clone());
         }
@@ -91,7 +91,7 @@ fn test_gpu_search_with_wrong_words() {
     // 构建完整助记词
     let mut mnemonic_parts = Vec::new();
     for i in 1..=config.mnemonic_size {
-        let key = format!("position_{}", i);
+        let key = format!("word{}", i - 1);
         if let Some(words) = config.word_positions.get(&key) {
             mnemonic_parts.push(words[0].clone());
         }
@@ -157,7 +157,7 @@ fn test_gpu_search_with_password() {
     // 构建完整助记词
     let mut mnemonic_parts = Vec::new();
     for i in 1..=config.mnemonic_size {
-        let key = format!("position_{}", i);
+        let key = format!("word{}", i - 1);
         if let Some(words) = config.word_positions.get(&key) {
             mnemonic_parts.push(words[0].clone());
         }
@@ -203,7 +203,7 @@ fn test_gpu_large_search_space() {
     // 构建完整助记词
     let mut mnemonic_parts = Vec::new();
     for i in 1..=config.mnemonic_size {
-        let key = format!("position_{}", i);
+        let key = format!("word{}", i - 1);
         if let Some(words) = config.word_positions.get(&key) {
             mnemonic_parts.push(words[0].clone());
         }
@@ -265,7 +265,7 @@ fn test_gpu_multiple_passwords() {
     // 构建完整助记词
     let mut mnemonic_parts = Vec::new();
     for i in 1..=config.mnemonic_size {
-        let key = format!("position_{}", i);
+        let key = format!("word{}", i - 1);
         if let Some(words) = config.word_positions.get(&key) {
             mnemonic_parts.push(words[0].clone());
         }
@@ -276,7 +276,7 @@ fn test_gpu_multiple_passwords() {
     let words: Vec<&str> = correct_mnemonic.split_whitespace().collect();
     let mut word_positions = std::collections::HashMap::new();
     for (i, word) in words.iter().enumerate() {
-        let key = format!("position_{}", i + 1);
+        let key = format!("word{}", i);
         word_positions.insert(key, vec![word.to_string()]);
     }
 

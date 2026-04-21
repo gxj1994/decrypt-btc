@@ -60,11 +60,11 @@ pub fn create_test_config_with_password(
     // 计算目标地址
     let address = mnemonic_to_address(&mnemonic, password)?;
 
-    // 构建word_positions
+    // 构建word_positions（使用word0-word11格式，0-based索引）
     let words: Vec<&str> = mnemonic.split_whitespace().collect();
     let mut word_positions = HashMap::new();
     for (i, word) in words.iter().enumerate() {
-        let key = format!("position_{}", i + 1);
+        let key = format!("word{}", i);  // 0-based: word0, word1, ..., word11
         word_positions.insert(key, vec![word.to_string()]);
     }
 
@@ -96,7 +96,7 @@ pub fn create_test_config_with_candidates(
     let mut word_positions = HashMap::new();
 
     for i in 0..mnemonic_size {
-        let key = format!("position_{}", i + 1);
+        let key = format!("word{}", i);  // 0-based格式
 
         if let Some(pos) = wrong_positions.iter().position(|&x| x == i) {
             // 这个位置包含正确词 + 干扰词
@@ -123,7 +123,7 @@ pub fn create_test_config_with_candidates(
 pub fn calculate_search_space(config: &Config) -> u64 {
     let mut space: u64 = 1;
     for i in 0..config.mnemonic_size {
-        let key = format!("position_{}", i + 1);
+        let key = format!("word{}", i);
         if let Some(candidates) = config.word_positions.get(&key) {
             space *= candidates.len() as u64;
         }
@@ -193,7 +193,7 @@ pub fn add_noise_words(
     let wordlist = decrypt_btc::mnemonic::Bip39Wordlist::load("data/english.txt")?;
     
     for (idx, &pos) in positions.iter().enumerate() {
-        let key = format!("position_{}", pos + 1);
+        let key = format!("word{}", pos);
         if let Some(original_words) = new_config.word_positions.get_mut(&key) {
             // 为每个原始词添加干扰词
             let noise_count = noise_counts[idx];
@@ -224,7 +224,7 @@ pub fn add_noise_words(
 pub fn build_full_mnemonic(config: &Config) -> String {
     let mut mnemonic_parts = Vec::new();
     for i in 1..=config.mnemonic_size {
-        let key = format!("position_{}", i);
+        let key = format!("word{}", i - 1);
         if let Some(words) = config.word_positions.get(&key) {
             mnemonic_parts.push(words[0].clone());
         }
