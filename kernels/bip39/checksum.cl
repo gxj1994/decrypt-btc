@@ -1,5 +1,6 @@
 // BIP39 校验位验证 (OpenCL)
 // 在PBKDF2之前验证助记词有效性，可减少93.75%的无效计算
+// 参考: rust-profanity-ref/kernels/bip39/entropy.cl 的 mnemonic_to_entropy 函数
 
 #ifndef BIP39_CHECKSUM_CL
 #define BIP39_CHECKSUM_CL
@@ -7,188 +8,131 @@
 // 注意：所有依赖内核文件在Rust端合并，不需要#include
 // #include "crypto/sha256.cl"
 
-// BIP39校验位验证
-// 根据BIP39规范，助记词的最后一个单词包含校验位
-// 12词: 128位熵 + 4位校验 = 132位 (12*11)
-// 15词: 160位熵 + 5位校验 = 165位 (15*11)
-// 18词: 192位熵 + 6位校验 = 198位 (18*11)
-// 21词: 224位熵 + 7位校验 = 231位 (21*11)
-// 24词: 256位熵 + 8位校验 = 264位 (24*11)
-
-// 根据助记词数量获取熵位数
-uint get_entropy_bits(uint mnemonic_count) {
-    switch (mnemonic_count) {
-        case 12: return 128;
-        case 15: return 160;
-        case 18: return 192;
-        case 21: return 224;
-        case 24: return 256;
-        default: return 0;
-    }
-}
-
-// 根据助记词数量获取校验位数
-uint get_checksum_bits(uint mnemonic_count) {
-    switch (mnemonic_count) {
-        case 12: return 4;
-        case 15: return 5;
-        case 18: return 6;
-        case 21: return 7;
-        case 24: return 8;
-        default: return 0;
-    }
-}
-
-// 从助记词索引数组中提取熵位
-// 将助记词索引转换为位数组，然后提取熵位
-void extract_entropy(const uint* mnemonic_indices, uint mnemonic_count, 
-                     uchar* entropy_bytes, uint entropy_bits) {
-    // 总位数 = mnemonic_count * 11
-    uint total_bits = mnemonic_count * 11;
+// 验证BIP39校验位（支持12/15/18/21/24词）
+// mnemonic_indices: 助记词索引数组
+// mnemonic_count: 助记词数量（12/15/18/21/24）
+// 返回: true = 校验通过, false = 校验失败
+bool validate_bip39_checksum(const uint* mnemonic_indices, uint mnemonic_count) {
+    // 根据助记词数量确定熵位数和校验位数
+    uint entropy_bits;
+    uint checksum_bits_count;
     
-    // 清空输出
-    uint byte_count = (entropy_bits + 7) / 8;
-    for (uint i = 0; i < byte_count; i++) {
-        entropy_bytes[i] = 0;
+    switch (mnemonic_count) {
+        case 12: entropy_bits = 128; checksum_bits_count = 4; break;
+        case 15: entropy_bits = 160; checksum_bits_count = 5; break;
+        case 18: entropy_bits = 192; checksum_bits_count = 6; break;
+        case 21: entropy_bits = 224; checksum_bits_count = 7; break;
+        case 24: entropy_bits = 256; checksum_bits_count = 8; break;
+        default: return false;
     }
     
-    // 从助记词索引中提取位
-    uint bit_pos = 0;
-    for (uint i = 0; i < mnemonic_count && bit_pos < entropy_bits; i++) {
-        uint index = mnemonic_indices[i];
+    // 总位数 = 熵位 + 校验位
+    uint total_bits = entropy_bits + checksum_bits_count;
+    
+    // 从助记词索引重建位流
+    // all_bits数组大小：24词时需要264位=33字节
+    uchar all_bits[33];
+    for (uint i = 0; i < 33; i++) {
+        all_bits[i] = 0;
+    }
+    
+    // 将每个助记词索引（11位）写入位流
+    for (uint i = 0; i < mnemonic_count; i++) {
+        uint word_idx = mnemonic_indices[i];
+        int bit_offset = i * 11;
         
-        // 每个索引11位，从最高位开始
-        for (int j = 10; j >= 0 && bit_pos < entropy_bits; j--) {
-            uint bit = (index >> j) & 1;
+        // 提取11位，写入all_bits
+        for (int j = 0; j < 11; j++) {
+            int bit_pos = bit_offset + j;
+            int byte_idx = bit_pos / 8;
+            int bit_in_byte = 7 - (bit_pos % 8);  // 大端序
             
-            uint byte_idx = bit_pos / 8;
-            uint bit_idx = 7 - (bit_pos % 8);  // 大端序
-            
-            if (bit) {
-                entropy_bytes[byte_idx] |= (1 << bit_idx);
+            // 如果该位为1，设置到all_bits中
+            if ((word_idx >> (10 - j)) & 1) {
+                all_bits[byte_idx] |= (1 << bit_in_byte);
             }
-            
-            bit_pos++;
         }
     }
-}
-
-// 计算熵的SHA256哈希，并提取校验位
-void compute_checksum_bits(const uchar* entropy_bytes, uint entropy_bits,
-                           uchar* checksum_bits, uint checksum_bit_count) {
-    // 计算SHA256
-    uchar hash[32];
-    sha256(entropy_bytes, (entropy_bits + 7) / 8, hash);
     
-    // 从哈希中提取校验位（从最高位开始）
-    for (uint i = 0; i < checksum_bit_count; i++) {
-        uint bit_idx = i;
-        uint byte_idx = bit_idx / 8;
-        uint bit_offset = 7 - (bit_idx % 8);  // 大端序
+    // 提取熵字节（前entropy_bits位）
+    uchar entropy[32];
+    uint entropy_bytes = (entropy_bits + 7) / 8;
+    for (uint i = 0; i < entropy_bytes; i++) {
+        entropy[i] = all_bits[i];
+    }
+    
+    // 提取实际校验位（位流的最后几位）
+    // 校验位在all_bits中的位置：从entropy_bits开始
+    uchar actual_checksum = 0;
+    for (uint i = 0; i < checksum_bits_count; i++) {
+        int bit_pos = entropy_bits + i;
+        int byte_idx = bit_pos / 8;
+        int bit_in_byte = 7 - (bit_pos % 8);
         
-        checksum_bits[i] = (hash[byte_idx] >> bit_offset) & 1;
-    }
-}
-
-// 从助记词中提取校验位（最后一个单词的低几位）
-void extract_checksum_from_mnemonic(const uint* mnemonic_indices, 
-                                    uint mnemonic_count,
-                                    uchar* checksum_bits, 
-                                    uint checksum_bit_count) {
-    // 最后一个单词的索引
-    uint last_word_index = mnemonic_indices[mnemonic_count - 1];
-    
-    // 校验位在最后一个单词的最低位
-    // 提取最低checksum_bit_count位
-    for (uint i = 0; i < checksum_bit_count; i++) {
-        checksum_bits[i] = (last_word_index >> i) & 1;
-    }
-}
-
-// 验证BIP39校验位
-// 返回: true = 有效, false = 无效
-bool validate_bip39_checksum(const uint* mnemonic_indices, uint mnemonic_count) {
-    // 获取熵位和校验位数
-    uint entropy_bits = get_entropy_bits(mnemonic_count);
-    uint checksum_bits_count = get_checksum_bits(mnemonic_count);
-    
-    if (entropy_bits == 0 || checksum_bits_count == 0) {
-        return false;  // 无效的助记词数量
+        if (all_bits[byte_idx] & (1 << bit_in_byte)) {
+            actual_checksum |= (1 << (checksum_bits_count - 1 - i));
+        }
     }
     
-    // 提取熵
-    uchar entropy_bytes[32];  // 最大256位 = 32字节
-    extract_entropy(mnemonic_indices, mnemonic_count, entropy_bytes, entropy_bits);
+    // 计算熵的SHA256
+    uchar hash[32];
+    sha256(entropy, entropy_bytes, hash);
     
-    // 计算期望的校验位
-    uchar expected_checksum[8];  // 最大8位
-    compute_checksum_bits(entropy_bytes, entropy_bits, expected_checksum, checksum_bits_count);
-    
-    // 从助记词中提取实际校验位
-    uchar actual_checksum[8];
-    extract_checksum_from_mnemonic(mnemonic_indices, mnemonic_count, 
-                                   actual_checksum, checksum_bits_count);
+    // 从SHA256哈希中提取期望的校验位（取hash[0]的前checksum_bits_count位）
+    uchar expected_checksum = hash[0] >> (8 - checksum_bits_count);
     
     // 对比校验位
-    for (uint i = 0; i < checksum_bits_count; i++) {
-        if (expected_checksum[i] != actual_checksum[i]) {
-            return false;
-        }
-    }
-    
-    return true;
+    return actual_checksum == expected_checksum;
 }
 
-// 优化的快速验证版本（使用位运算）
+// 优化的快速验证版本（仅支持24词，使用位运算优化）
 // 适用于在内核中快速过滤
 bool validate_bip39_checksum_fast(const uint* mnemonic_indices, uint mnemonic_count) {
-    // 获取熵位和校验位数
-    uint entropy_bits = get_entropy_bits(mnemonic_count);
-    uint checksum_bits_count = get_checksum_bits(mnemonic_count);
-    
-    if (entropy_bits == 0) {
-        return false;
+    // 仅支持24词
+    if (mnemonic_count != 24) {
+        // 对于其他长度，使用通用版本
+        return validate_bip39_checksum(mnemonic_indices, mnemonic_count);
     }
     
-    // 提取熵字节
-    uchar entropy_bytes[32];
-    uint byte_count = (entropy_bits + 7) / 8;
-    
-    uint bit_pos = 0;
-    for (uint i = 0; i < byte_count; i++) {
-        entropy_bytes[i] = 0;
+    // 24词: 256位熵 + 8位校验 = 264位
+    // 重建位流
+    uchar all_bits[33];
+    for (uint i = 0; i < 33; i++) {
+        all_bits[i] = 0;
     }
     
-    for (uint i = 0; i < mnemonic_count && bit_pos < entropy_bits; i++) {
-        uint index = mnemonic_indices[i];
-        for (int j = 10; j >= 0 && bit_pos < entropy_bits; j--) {
-            uint bit = (index >> j) & 1;
-            uint byte_idx = bit_pos / 8;
-            uint bit_idx = 7 - (bit_pos % 8);
-            if (bit) {
-                entropy_bytes[byte_idx] |= (1 << bit_idx);
+    for (uint i = 0; i < 24; i++) {
+        uint word_idx = mnemonic_indices[i];
+        int bit_offset = i * 11;
+        
+        for (int j = 0; j < 11; j++) {
+            int bit_pos = bit_offset + j;
+            int byte_idx = bit_pos / 8;
+            int bit_in_byte = 7 - (bit_pos % 8);
+            
+            if ((word_idx >> (10 - j)) & 1) {
+                all_bits[byte_idx] |= (1 << bit_in_byte);
             }
-            bit_pos++;
         }
     }
     
-    // SHA256哈希
-    uchar hash[32];
-    sha256(entropy_bytes, byte_count, hash);
-    
-    // 提取期望的校验位（从hash的第一个字节的高位）
-    uint expected_checksum = 0;
-    for (uint i = 0; i < checksum_bits_count; i++) {
-        uint byte_idx = i / 8;
-        uint bit_idx = 7 - (i % 8);
-        uint bit = (hash[byte_idx] >> bit_idx) & 1;
-        expected_checksum |= (bit << i);
+    // 提取熵（前32字节）
+    uchar entropy[32];
+    for (uint i = 0; i < 32; i++) {
+        entropy[i] = all_bits[i];
     }
     
-    // 提取实际的校验位（从最后一个单词的低位）
-    uint actual_checksum = mnemonic_indices[mnemonic_count - 1] & ((1 << checksum_bits_count) - 1);
+    // 提取实际校验位（all_bits[32]）
+    uchar actual_checksum = all_bits[32];
     
-    return expected_checksum == actual_checksum;
+    // 计算SHA256
+    uchar hash[32];
+    sha256(entropy, 32, hash);
+    
+    // 期望校验位（hash[0]）
+    uchar expected_checksum = hash[0];
+    
+    return actual_checksum == expected_checksum;
 }
 
 #endif // BIP39_CHECKSUM_CL

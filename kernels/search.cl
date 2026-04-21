@@ -78,12 +78,12 @@ __kernel void btc_address_search(
         mnemonic_indices[i] = 0;
     }
     
-    // DEBUG: 临时禁用校验位验证
-    // if (!validate_bip39_checksum_fast(mnemonic_indices, MNEMONIC_SIZE)) {
-    //     // 校验失败，跳过这个助记词
-    //     atomic_inc(stats_counter);
-    //     return;
-    // }
+    // 验证BIP39校验位
+    if (!validate_bip39_checksum_fast(mnemonic_indices, MNEMONIC_SIZE)) {
+        // 校验失败，跳过这个助记词
+        atomic_inc(stats_counter);
+        return;
+    }
     
     // 步骤3: 助记词 → 种子 (PBKDF2-HMAC-SHA512)
     seed_t seed;
