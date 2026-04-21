@@ -58,7 +58,7 @@ fn test_gpu_simple_search() {
     println!("\n[GPU端计算]");
     let mut searcher =
         decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(&config).expect("GPU搜索器初始化失败");
-    let results = searcher.search(&config).expect("GPU搜索失败");
+    let results = searcher.search(&config, None).expect("GPU搜索失败");
 
     println!("[GPU结果] 找到 {} 个匹配", results.len());
     if !results.is_empty() {
@@ -129,7 +129,7 @@ fn test_gpu_search_with_wrong_words() {
     // 调用GPU搜索
     let mut searcher =
         decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(&config).expect("GPU搜索器初始化失败");
-    let results = searcher.search(&config).expect("GPU搜索失败");
+    let results = searcher.search(&config, None).expect("GPU搜索失败");
 
     assert_eq!(results.len(), 1, "GPU应该只找到1个匹配");
     assert!(
@@ -183,7 +183,7 @@ fn test_gpu_search_with_password() {
     // 调用GPU搜索
     let mut searcher =
         decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(&config).expect("GPU搜索器初始化失败");
-    let results = searcher.search(&config).expect("GPU搜索失败");
+    let results = searcher.search(&config, None).expect("GPU搜索失败");
 
     assert!(!results.is_empty(), "GPU应该找到匹配的助记词");
     assert_eq!(results[0].password, passphrase, "密码应该匹配");
@@ -246,7 +246,7 @@ fn test_gpu_large_search_space() {
     // 调用GPU搜索
     let mut searcher =
         decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(&config).expect("GPU搜索器初始化失败");
-    let results = searcher.search(&config).expect("GPU搜索失败");
+    let results = searcher.search(&config, None).expect("GPU搜索失败");
 
     assert!(!results.is_empty(), "GPU应该在大搜索空间中找到匹配");
 
@@ -307,7 +307,7 @@ fn test_gpu_multiple_passwords() {
     // 调用GPU搜索
     let mut searcher =
         decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(&config).expect("GPU搜索器初始化失败");
-    let results = searcher.search(&config).expect("GPU搜索失败");
+    let results = searcher.search(&config, None).expect("GPU搜索失败");
 
     assert_eq!(results.len(), 1, "GPU应该只找到1个匹配（正确的密码）");
     assert_eq!(

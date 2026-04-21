@@ -262,7 +262,7 @@ pub fn run_gpu_search_test(config: &Config, test_name: &str, should_find: bool) 
     println!("\n[GPU端计算]");
     let mut searcher = decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(config)
         .expect("GPU搜索器初始化失败");
-    let results = searcher.search(config).expect("GPU搜索失败");
+    let results = searcher.search(config, None).expect("GPU搜索失败");
     
     // 显示性能统计
     let stats = &searcher.stats;

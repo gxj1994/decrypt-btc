@@ -71,65 +71,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// CPU verification test (for development)
+/// CPU验证测试（for development）
 fn run_cpu_verification_test(
     generator: &CandidateGenerator,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Test with a small subset if search space is too large
-    let test_candidates = if config.mnemonic_size == 12 {
-        // Use only first few candidates for each position
-        let mut small = Vec::new();
-        for position in generator.wordlist().all_indices().iter().take(4) {
-            small.push(vec![*position]);
+    // 构建候选词
+    let candidates = generator.build_candidates(config)?;
+    let search_space = CandidateGenerator::calculate_search_space(&candidates);
+    
+    info!("CPU测试：搜索空间 = {:.2e} 组合", search_space as f64);
+    
+    // 如果搜索空间太大，只测试前几个组合
+    let max_test_count = 10;
+    if search_space > max_test_count as u64 {
+        info!("搜索空间过大，只测试前 {} 个组合", max_test_count);
+    }
+    
+    // 生成要测试的索引组合
+    let mut test_count = 0;
+    let mut indices = vec![0usize; config.mnemonic_size];
+    
+    loop {
+        if test_count >= max_test_count {
+            break;
         }
-        // Fill remaining positions
-        for _ in small.len()..12 {
-            small.push(vec![0]);
+        
+        // 将indices转换为助记词
+        let mnemonic_indices: Vec<u16> = indices.iter().map(|&i| i as u16).collect();
+        let mnemonic = indices_to_mnemonic(&mnemonic_indices, generator.wordlist())?;
+        
+        info!("\n测试 [{}/{}]: {}", test_count + 1, max_test_count.min(search_space as usize), mnemonic);
+        
+        // 测试所有密码
+        let passwords = if config.passwords.is_empty() {
+            vec!["".to_string()]
+        } else {
+            config.passwords.clone()
+        };
+        
+        for password in &passwords {
+            let address = mnemonic_to_address(&mnemonic, password)?;
+            info!("  Password: '{}' -> Address: {}", password, address);
+            
+            if address == config.target_address {
+                info!("\n*** MATCH FOUND! ***");
+                info!("Mnemonic: {}", mnemonic);
+                info!("Password: {}", password);
+                return Ok(());
+            }
         }
-        small
-    } else {
-        return Ok(());
-    };
-
-    info!("CPU test: generating addresses for small candidate set");
-
-    // Test first combination
-    let first_mnemonic = indices_to_mnemonic(
-        &test_candidates.iter().map(|v| v[0]).collect::<Vec<_>>(),
-        generator.wordlist(),
-    )?;
-
-    info!("Test mnemonic: {}", first_mnemonic);
-
-    for password in &config.passwords {
-        let address = mnemonic_to_address(&first_mnemonic, password)?;
-        info!("  Password: '{}' -> Address: {}", password, address);
-
-        if address == config.target_address {
-            info!("*** MATCH FOUND! ***");
-            info!("Mnemonic: {}", first_mnemonic);
-            info!("Password: {}", password);
+        
+        // 生成下一个索引组合
+        test_count += 1;
+        let mut pos = config.mnemonic_size - 1;
+        while pos < config.mnemonic_size {
+            indices[pos] += 1;
+            if indices[pos] < candidates[pos].len() {
+                break;
+            }
+            indices[pos] = 0;
+            if pos == 0 {
+                // 已经遍历完所有组合
+                info!("\n已遍历完所有 {} 个组合", test_count);
+                return Ok(());
+            }
+            pos -= 1;
         }
     }
-
-    if config.passwords.is_empty() {
-        let address = mnemonic_to_address(&first_mnemonic, "")?;
-        info!("  No password -> Address: {}", address);
-
-        if address == config.target_address {
-            info!("*** MATCH FOUND! ***");
-            info!("Mnemonic: {}", first_mnemonic);
-        }
-    }
-
+    
+    info!("\nCPU测试完成，未找到匹配");
     Ok(())
 }
 
 /// GPU搜索模式
 fn run_gpu_search(
     config: &Config,
-    _candidates: &[Vec<u16>],
+    candidates: &[Vec<u16>],
     _batch_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::time::Instant;
@@ -142,9 +160,9 @@ fn run_gpu_search(
     let init_elapsed = init_start.elapsed().as_secs_f64();
     info!("GPU搜索器初始化完成，耗时: {:.3}秒", init_elapsed);
 
-    // 执行GPU搜索
+    // 执行GPU搜索（传入预生成的candidates，避免重复构建）
     info!("\n开始GPU搜索...");
-    let results = searcher.search(config)?;
+    let results = searcher.search(config, Some(candidates))?;
 
     // 输出性能统计
     let stats = &searcher.stats;

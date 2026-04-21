@@ -154,11 +154,14 @@ impl GpuSearcher {
         let initial_stats: Vec<u32> = vec![0];
         flag_buffer.write(&initial_stats).enq()?;
 
-        // 创建word_indices缓冲区（足够大的空间，支持干扰词场景）
+        // 创建word_indices缓冲区（支持最大24个位置，每个位置最多2048个候选词）
+        // 数据格式：[数量, 索引1, 索引2, ..., 数量, 索引1, ...]
+        // 最大需要: 24 * (1 + 2048) = 49,176 个u32
+        let max_word_indices_size = 24 * (1 + 2048);
         let word_indices_buffer = Buffer::<u32>::builder()
             .queue(queue.clone())
             .flags(ocl::flags::MEM_READ_ONLY)
-            .len(2048) // 足够大，支持多个干扰词
+            .len(max_word_indices_size)
             .build()?;
 
         // 创建target_hash缓冲区（20字节）
@@ -276,14 +279,19 @@ impl GpuSearcher {
     pub fn search(
         &mut self,
         config: &Config,
+        candidates: Option<&[Vec<u16>]>,  // 可选的预生成候选词
     ) -> Result<Vec<GpuSearchResult>, Box<dyn std::error::Error>> {
         use std::time::Instant;
         
         info!("[GPU] 开始搜索...");
         let search_start = Instant::now();
 
-        // 1. 准备助记词索引数据
-        let word_indices = self.prepare_word_indices(config)?;
+        // 1. 准备助记词索引数据（使用预生成的candidates或从config构建）
+        let word_indices = if let Some(cands) = candidates {
+            self.prepare_word_indices_from_candidates(cands)?
+        } else {
+            self.prepare_word_indices(config)?
+        };
         info!("[GPU] 准备 {} 个助记词索引", word_indices.len());
 
         // 2. 上传word_indices到GPU
@@ -308,8 +316,12 @@ impl GpuSearcher {
         self.salt_buffer.write(&salt).enq()?;
         debug!("[GPU] Salt已预计算并上传到GPU，长度: {}", self.salt_len);
 
-        // 6. 计算工作项数量
-        let work_items = self.calculate_work_items(config);
+        // 6. 计算工作项数量（使用candidates或从config计算）
+        let work_items = if let Some(cands) = candidates {
+            self.calculate_work_items_from_candidates(cands)
+        } else {
+            self.calculate_work_items(config)
+        };
         info!("[GPU] 工作项数量: {}", work_items);
 
         if work_items == 0 {
@@ -431,24 +443,33 @@ impl GpuSearcher {
         // 加载单词表
         let wordlist = Bip39Wordlist::load("data/english.txt")?;
 
-        // 遍历每个位置
-        for i in 1..=config.mnemonic_size {
-            let key = format!("position_{}", i);
-            if let Some(candidates) = config.word_positions.get(&key) {
-                // 先写入候选词数量
-                indices.push(candidates.len() as u32);
-                
-                // 再写入每个候选词的索引
-                for word in candidates {
-                    if let Some(index) = wordlist.get_index(word) {
-                        indices.push(index as u32);
-                    } else {
-                        return Err(format!("单词 '{}' 不在BIP39单词表中", word).into());
-                    }
+        // 遍历每个位置（配置使用word0-word11，0-based索引）
+        for i in 0..config.mnemonic_size {
+            let key = format!("word{}", i);
+            
+            // 获取候选词列表
+            let candidates = if let Some(words) = config.word_positions.get(&key) {
+                if words.is_empty() {
+                    // 空数组表示使用全部2048个单词
+                    (0..2048).map(|idx| wordlist.get_word(idx).unwrap().to_string()).collect::<Vec<_>>()
+                } else {
+                    words.clone()
                 }
             } else {
-                // 如果没有候选词，默认为0个（不应该发生）
-                indices.push(0);
+                // 如果配置中不存在该key，也使用全部2048个单词
+                (0..2048).map(|idx| wordlist.get_word(idx).unwrap().to_string()).collect::<Vec<_>>()
+            };
+            
+            // 先写入候选词数量
+            indices.push(candidates.len() as u32);
+            
+            // 再写入每个候选词的索引
+            for word in &candidates {
+                if let Some(index) = wordlist.get_index(word) {
+                    indices.push(index as u32);
+                } else {
+                    return Err(format!("单词 '{}' 不在BIP39单词表中", word).into());
+                }
             }
         }
 
@@ -460,15 +481,65 @@ impl GpuSearcher {
         Ok(indices)
     }
 
-    /// 计算工作项数量
-    fn calculate_work_items(&self, config: &Config) -> usize {
-        let mut work_items = 1;
-        for i in 1..=config.mnemonic_size {
-            let key = format!("position_{}", i);
-            if let Some(candidates) = config.word_positions.get(&key) {
-                work_items *= candidates.len();
+    /// 从预生成的candidates准备助记词索引数组（优化版，避免重复加载wordlist）
+    fn prepare_word_indices_from_candidates(
+        &self,
+        candidates: &[Vec<u16>],
+    ) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+        let mut indices = Vec::new();
+
+        // 遍历每个位置的候选词
+        for position_candidates in candidates {
+            // 先写入候选词数量
+            indices.push(position_candidates.len() as u32);
+            
+            // 再写入每个候选词的索引
+            for &word_index in position_candidates {
+                indices.push(word_index as u32);
             }
         }
+
+        info!(
+            "[GPU] 从预生成candidates准备 {} 个位置的索引，总计 {} 个u32",
+            candidates.len(),
+            indices.len()
+        );
+        Ok(indices)
+    }
+
+    /// 从预生成的candidates计算工作项数量
+    fn calculate_work_items_from_candidates(&self, candidates: &[Vec<u16>]) -> usize {
+        let mut work_items: usize = 1;
+        for position_candidates in candidates {
+            work_items = work_items.saturating_mul(position_candidates.len());
+        }
+        work_items
+    }
+
+    /// 计算工作项数量
+    fn calculate_work_items(&self, config: &Config) -> usize {
+        let mut work_items: usize = 1;
+        
+        // 遍历每个位置（配置使用word0-word11，0-based索引）
+        for i in 0..config.mnemonic_size {
+            let key = format!("word{}", i);
+            
+            // 获取候选词数量
+            let count = if let Some(words) = config.word_positions.get(&key) {
+                if words.is_empty() {
+                    // 空数组表示使用全部2048个单词
+                    2048
+                } else {
+                    words.len()
+                }
+            } else {
+                // 如果配置中不存在该key，也使用全部2048个单词
+                2048
+            };
+            
+            work_items = work_items.saturating_mul(count);
+        }
+        
         work_items
     }
 

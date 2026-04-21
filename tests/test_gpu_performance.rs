@@ -26,7 +26,7 @@ fn test_performance_stats_basic() {
     let mut searcher = GpuSearcher::new(&config).expect("GPU搜索器初始化失败");
 
     // 执行搜索
-    let _results = searcher.search(&config).expect("GPU搜索失败");
+    let _results = searcher.search(&config, None).expect("GPU搜索失败");
 
     // 验证性能统计
     let stats = &searcher.stats;
@@ -80,7 +80,7 @@ fn test_performance_stats_multiple_work_items() {
     let start = Instant::now();
     
     // 执行搜索
-    let _results = searcher.search(&config).expect("GPU搜索失败");
+    let _results = searcher.search(&config, None).expect("GPU搜索失败");
     
     let elapsed = start.elapsed().as_secs_f64();
 
