@@ -35,8 +35,18 @@ fn gpu_debug_compute(
     _wordlist: &Bip39Wordlist,
 ) -> Result<GpuDebugOutput, Box<dyn std::error::Error>> {
     let source = load_all_kernel_sources();
-    let password = passphrase.as_bytes();
     let mnemonic_size = word_indices.len() as u32;
+    
+    // CPU端预计算salt = "mnemonic" + passphrase
+    let salt = if passphrase.is_empty() {
+        b"mnemonic".to_vec()
+    } else {
+        let mut salt = Vec::new();
+        salt.extend_from_slice(b"mnemonic");
+        salt.extend_from_slice(passphrase.as_bytes());
+        salt
+    };
+    let salt_len = salt.len() as u32;
 
     // 创建ProQue
     let proque = ProQue::builder().src(source).dims(1).build()?;
@@ -49,19 +59,11 @@ fn gpu_debug_compute(
         .copy_host_slice(word_indices)
         .build()?;
 
-    let password_buffer = Buffer::<u8>::builder()
+    let salt_buffer = Buffer::<u8>::builder()
         .queue(proque.queue().clone())
         .flags(MemFlags::READ_ONLY)
-        .len(if password.is_empty() {
-            1
-        } else {
-            password.len()
-        })
-        .copy_host_slice(if password.is_empty() {
-            &[0u8]
-        } else {
-            password
-        })
+        .len(salt.len())
+        .copy_host_slice(&salt)
         .build()?;
 
     let seed_buffer = Buffer::<u8>::builder()
@@ -117,8 +119,8 @@ fn gpu_debug_compute(
         .kernel_builder("debug_address_generation")
         .arg(&mnemonic_buffer)
         .arg(mnemonic_size)
-        .arg(&password_buffer)
-        .arg(password.len() as u32)
+        .arg(&salt_buffer)
+        .arg(salt_len)
         .arg(&seed_buffer)
         .arg(&master_key_buffer)
         .arg(&master_chain_buffer)

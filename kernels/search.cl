@@ -32,8 +32,8 @@ void hash160(const uchar* data, uint data_len, uchar output[20]) {
 __kernel void btc_address_search(
     __global const uint* word_indices,      // 每个位置的候选词索引
     __constant const uchar* target_hash,    // 目标公钥哈希(20字节)
-    __global const uchar* password,         // 密码(passphrase)
-    uint password_len,                      // 密码长度
+    __global const uchar* salt,             // 预计算的salt ("mnemonic" + passphrase)
+    uint salt_len,                          // salt长度
     __global uint* result_buffer,           // 结果缓冲区
     __global uint* stats_counter            // 统计计数器
 ) {
@@ -92,21 +92,15 @@ __kernel void btc_address_search(
     uchar mnemonic_str[256];
     uchar mnemonic_len = mnemonic_to_string(&mnemonic, mnemonic_str, 255);
     
-    // 构建salt = "mnemonic" + passphrase
-    uchar salt[512];
-    salt[0] = 'm'; salt[1] = 'n'; salt[2] = 'e'; salt[3] = 'm';
-    salt[4] = 'o'; salt[5] = 'n'; salt[6] = 'i'; salt[7] = 'c';
-    uint salt_len = 8;
-    
-    if (password_len > 0) {
-        for (uint i = 0; i < password_len && salt_len + i < 512; i++) {
-            salt[salt_len + i] = password[i];
-        }
-        salt_len += password_len;
+    // 将__global的salt复制到__private数组（PBKDF2需要__private地址空间）
+    uchar salt_local[256];
+    for (uint i = 0; i < salt_len && i < 256; i++) {
+        salt_local[i] = salt[i];
     }
     
+    // 使用预计算的salt（CPU端已构建好 "mnemonic" + passphrase）
     // 调用PBKDF2
-    pbkdf2_hmac_sha512(mnemonic_str, mnemonic_len, salt, salt_len, 2048, seed.bytes, 64);
+    pbkdf2_hmac_sha512(mnemonic_str, mnemonic_len, salt_local, salt_len, 2048, seed.bytes, 64);
     
     // 步骤4: BIP32派生私钥 (m/44'/0'/0'/0/0)
     uchar private_key[32];

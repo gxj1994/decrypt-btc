@@ -17,8 +17,8 @@ void hash160(const uchar* data, uint data_len, uchar output[20]) {
 __kernel void debug_address_generation(
     __global const uint* word_indices,        // 助记词单词索引数组
     uint mnemonic_size,                       // 助记词长度（单词数量）
-    __global const uchar* password,         // 密码
-    uint password_len,                      // 密码长度
+    __global const uchar* salt,               // 预计算的salt ("mnemonic" + passphrase)
+    uint salt_len,                            // salt长度
     __global uchar* output_seed,            // 输出：PBKDF2种子 (64字节)
     __global uchar* output_master_key,      // 输出：BIP32主密钥 (32字节)
     __global uchar* output_master_chain,    // 输出：BIP32主链码 (32字节)
@@ -55,21 +55,16 @@ __kernel void debug_address_generation(
     
     // 步骤2: PBKDF2-HMAC-SHA512 计算种子
     seed_t seed;
-    uchar salt[512];
     
-    // 构建salt = "mnemonic" + password
-    const uchar mnemonic_salt[] = "mnemonic";
-    uint salt_len = 8;
-    for (uint i = 0; i < 8; i++) {
-        salt[i] = mnemonic_salt[i];
-    }
-    for (uint i = 0; i < password_len && i < 120; i++) {
-        salt[8 + i] = password[i];
-        salt_len++;
+    // 将__global的salt复制到__private数组（PBKDF2需要__private地址空间）
+    uchar salt_local[256];
+    for (uint i = 0; i < salt_len && i < 256; i++) {
+        salt_local[i] = salt[i];
     }
     
+    // 使用预计算的salt（CPU端已构建好 "mnemonic" + passphrase）
     // 调用PBKDF2
-    pbkdf2_hmac_sha512(local_mnemonic, mnemonic_len, salt, salt_len, 2048, seed.bytes, 64);
+    pbkdf2_hmac_sha512(local_mnemonic, mnemonic_len, salt_local, salt_len, 2048, seed.bytes, 64);
     
     // 输出种子
     for (int i = 0; i < 64; i++) {

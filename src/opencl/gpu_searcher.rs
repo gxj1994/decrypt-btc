@@ -22,21 +22,35 @@ pub struct GpuSearcher {
     kernel: Kernel,
     word_indices_buffer: Buffer<u32>,
     target_hash_buffer: Buffer<u8>,
-    password_buffer: Buffer<u8>,
+    salt_buffer: Buffer<u8>,              // 预计算的salt缓冲区
     result_buffer: Buffer<u32>,
     flag_buffer: Buffer<i32>,
     mnemonic_size: usize,
+    salt_len: u32,                        // salt长度
 }
 
 impl GpuSearcher {
     /// 创建GPU搜索器
     pub fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
         // 根据config的mnemonic_size动态编译内核
-        Self::new_with_mnemonic_size(config.mnemonic_size)
+        Self::new_with_config(config)
     }
         
     /// 创建GPU搜索器（指定助记词长度）
     pub fn new_with_mnemonic_size(mnemonic_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        // 创建一个默认config，仅用于初始化
+        let config = Config {
+            mnemonic_size,
+            passwords: vec![],
+            target_address: "1KddEkd2fiWuibkSmK1ASBpjpTDjmAZTKs".to_string(), // 默认地址
+            word_positions: std::collections::HashMap::new(),
+        };
+        Self::new_with_config(&config)
+    }
+    
+    /// 创建GPU搜索器（完整配置）
+    pub fn new_with_config(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
+        let mnemonic_size = config.mnemonic_size;
         info!("[GPU] 初始化GPU搜索器 (mnemonic_size={})...", mnemonic_size);
         info!("[GPU] 初始化GPU搜索器...");
 
@@ -104,9 +118,13 @@ impl GpuSearcher {
         let queue = Queue::new(&context, device, None)?;
 
         // 3. 编译内核程序（传入mnemonic_size）
-        let program = Self::compile_kernel_program(&context, mnemonic_size)?;
+        let program = Self::compile_kernel_program(&context, config.mnemonic_size)?;
 
-        // 4. 创建缓冲区
+        // 4. 预计算目标哈希（优化：在初始化时上传，避免每次search重复上传）
+        let target_hash = Self::decode_target_address_static(&config.target_address)?;
+        info!("[GPU] 目标哈希已预计算: {:?}", &target_hash[..8]);
+        
+        // 创建缓冲区
         let config_size = 1024; // 配置缓冲区大小
         let config_buffer = Buffer::<u8>::builder()
             .queue(queue.clone())
@@ -144,12 +162,16 @@ impl GpuSearcher {
             .flags(ocl::flags::MEM_READ_ONLY)
             .len(20)
             .build()?;
+        
+        // 初始化时即上传目标哈希（优化2）
+        target_hash_buffer.write(&target_hash).enq()?;
+        debug!("[GPU] 目标哈希已在初始化时上传到GPU");
 
-        // 创建password缓冲区（足够大，支持长密码）
-        let password_buffer = Buffer::<u8>::builder()
+        // 创建salt缓冲区（最大256字节，支持长passphrase）
+        let salt_buffer = Buffer::<u8>::builder()
             .queue(queue.clone())
             .flags(ocl::flags::MEM_READ_ONLY)
-            .len(256) // 支持最长256字节的密码
+            .len(256)
             .build()?;
 
         // 初始化标志为0
@@ -164,8 +186,8 @@ impl GpuSearcher {
             .global_work_size(SpatialDims::One(1))
             .arg(&word_indices_buffer) // 参数1: word_indices
             .arg(&target_hash_buffer) // 参数2: target_hash
-            .arg(&password_buffer) // 参数3: password
-            .arg(&(0u32)) // 参数4: password_len
+            .arg(&salt_buffer) // 参数3: salt (预计算)
+            .arg(&(0u32)) // 参数4: salt_len
             .arg(&result_buffer) // 参数5: result_buffer
             .arg(&flag_buffer) // 参数6: stats_counter
             .build()?;
@@ -179,10 +201,11 @@ impl GpuSearcher {
             kernel,
             word_indices_buffer,
             target_hash_buffer,
-            password_buffer,
+            salt_buffer,
             result_buffer,
             flag_buffer,
             mnemonic_size,
+            salt_len: 0,
         })
     }
 
@@ -257,24 +280,23 @@ impl GpuSearcher {
         self.word_indices_buffer.write(&word_indices).enq()?;
         debug!("[GPU] 助记词索引已上传到GPU");
 
-        // 3. 准备目标哈希
-        let target_hash = self.decode_target_address(&config.target_address)?;
-        info!("[GPU] 目标哈希: {:?}", &target_hash[..8]);
+        // 3. 目标哈希已在初始化时上传（优化2），无需重复上传
+        debug!("[GPU] 目标哈希已在初始化时预上传");
 
-        // 4. 上传目标哈希到GPU
-        self.target_hash_buffer.write(&target_hash).enq()?;
-        debug!("[GPU] 目标哈希已上传到GPU");
-
-        // 5. 准备密码
-        let password = if !config.passwords.is_empty() {
-            config.passwords[0].as_bytes().to_vec()
+        // 5. 准备salt（预计算 "mnemonic" + passphrase）
+        let salt = if !config.passwords.is_empty() {
+            let passphrase = config.passwords[0].as_bytes();
+            let mut salt = Vec::new();
+            salt.extend_from_slice(b"mnemonic");
+            salt.extend_from_slice(passphrase);
+            salt
         } else {
-            vec![]
+            b"mnemonic".to_vec()
         };
-
-        if !password.is_empty() {
-            self.password_buffer.write(&password).enq()?;
-        }
+        
+        self.salt_len = salt.len() as u32;
+        self.salt_buffer.write(&salt).enq()?;
+        debug!("[GPU] Salt已预计算并上传到GPU，长度: {}", self.salt_len);
 
         // 6. 计算工作项数量
         let work_items = self.calculate_work_items(config);
@@ -288,10 +310,8 @@ impl GpuSearcher {
         // 7. 更新内核参数（重要：buffer内容已改变，需要重新设置参数）
         self.kernel.set_arg(0, &self.word_indices_buffer)?;
         self.kernel.set_arg(1, &self.target_hash_buffer)?;
-
-        let password_len = password.len() as u32;
-        self.kernel.set_arg(2, &self.password_buffer)?;
-        self.kernel.set_arg(3, &password_len)?;
+        self.kernel.set_arg(2, &self.salt_buffer)?;
+        self.kernel.set_arg(3, &self.salt_len)?;
         self.kernel.set_arg(4, &self.result_buffer)?;
         self.kernel.set_arg(5, &self.flag_buffer)?;
 
@@ -354,8 +374,8 @@ impl GpuSearcher {
         Ok(data[..1024].to_vec())
     }
 
-    /// 解码目标地址为哈希
-    fn decode_target_address(&self, address: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    /// 解码目标地址为哈希（静态方法，用于初始化时预计算）
+    fn decode_target_address_static(address: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         use crate::address::base58check_decode;
 
         // 使用Base58Check解码Legacy地址，提取pubkey_hash（20字节）
@@ -374,6 +394,11 @@ impl GpuSearcher {
             &pubkey_hash[..8]
         );
         Ok(pubkey_hash)
+    }
+    
+    /// 解码目标地址为哈希
+    fn decode_target_address(&self, address: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Self::decode_target_address_static(address)
     }
 
     /// 准备助记词索引数组

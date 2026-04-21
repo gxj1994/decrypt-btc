@@ -104,18 +104,14 @@ mod tests {
 
     #[test]
     fn test_mnemonic_to_address_random() {
-        use rand::Rng;
+        use bip39::Mnemonic;
+        use rand::thread_rng;
 
-        // 使用随机助记词测试
-        let wordlist = bip39::Language::English.word_list();
-        let mut rng = rand::thread_rng();
-
-        let mut words = Vec::new();
-        for _ in 0..12 {
-            let idx = rng.gen_range(0..2048);
-            words.push(wordlist[idx]);
-        }
-        let mnemonic = words.join(" ");
+        // 使用bip39库生成有效的助记词（包含正确的校验位）
+        let mut rng = thread_rng();
+        let mnemonic_obj = Mnemonic::generate_in_with(&mut rng, bip39::Language::English, 12)
+            .expect("生成助记词失败");
+        let mnemonic = mnemonic_obj.to_string();
 
         let address = mnemonic_to_address(&mnemonic, "").expect("地址生成失败");
 
