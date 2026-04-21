@@ -1,5 +1,5 @@
 use clap::Parser;
-use log::info;
+use log::{debug, info};
 
 use decrypt_btc::config::Config;
 use decrypt_btc::mnemonic::{Bip39Wordlist, CandidateGenerator};
@@ -26,8 +26,8 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logger
-    env_logger::init();
+    // Initialize logger with default info level
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // Parse command line arguments
     let args = Args::parse();
@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 自动检测GPU并执行搜索
-    info!("\n[Mode] GPU accelerated search");
+    debug!("\n[Mode] GPU accelerated search");
     run_gpu_search(&config, &candidates, args.batch_size)?;
 
     Ok(())
@@ -94,7 +94,7 @@ fn run_gpu_search(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::time::Instant;
 
-    info!("\n初始化GPU搜索器...");
+    info!("初始化GPU搜索器...");
     let init_start = Instant::now();
 
     // 创建GPU搜索器
@@ -103,12 +103,12 @@ fn run_gpu_search(
     info!("GPU搜索器初始化完成，耗时: {:.3}秒", init_elapsed);
 
     // 执行GPU搜索（传入预生成的candidates，避免重复构建）
-    info!("\n开始GPU搜索...");
+    info!("开始GPU搜索...");
     let results = searcher.search(config, Some(candidates))?;
 
     // 输出性能统计
     let stats = &searcher.stats;
-    info!("\n{}", "=".repeat(60));
+    info!("{}", "=".repeat(60));
     info!("GPU搜索性能报告");
     info!("{}", "=".repeat(60));
     info!("初始化时间: {:.3} 秒", init_elapsed);
@@ -135,12 +135,12 @@ fn run_gpu_search(
 
     // 输出结果
     if results.is_empty() {
-        info!("\n未找到匹配的助记词");
+        info!("❌未找到匹配的助记词");
     } else {
-        info!("\n✅ 找到 {} 个匹配的助记词！", results.len());
+        info!("✅ 找到 {} 个匹配的助记词！", results.len());
         for (i, result) in results.iter().enumerate() {
-            info!("\n匹配 #{}", i + 1);
-            info!("  工作项索引: {}", result.work_item_index);
+            info!("  匹配 #{}", i + 1);
+            debug!("  工作项索引: {}", result.work_item_index);
             info!("  助记词: {}", result.mnemonic);
             info!("  密码: {}", result.password);
         }

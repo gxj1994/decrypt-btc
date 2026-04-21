@@ -30,13 +30,13 @@ fn load_all_kernel_sources() -> String {
 
 /// GPU调试：输出每一步的中间结果
 fn gpu_debug_compute(
-    word_indices: &[u32],  // 助记词单词索引数组
+    word_indices: &[u32], // 助记词单词索引数组
     passphrase: &str,
     _wordlist: &Bip39Wordlist,
 ) -> Result<GpuDebugOutput, Box<dyn std::error::Error>> {
     let source = load_all_kernel_sources();
     let mnemonic_size = word_indices.len() as u32;
-    
+
     // CPU端预计算salt = "mnemonic" + passphrase
     let salt = if passphrase.is_empty() {
         b"mnemonic".to_vec()
@@ -200,7 +200,7 @@ mod tests {
 
         // 加载单词表
         let wordlist = Bip39Wordlist::load("data/english.txt").unwrap();
-        
+
         // 将助记词转换为单词索引
         let words: Vec<&str> = mnemonic.split_whitespace().collect();
         let mut word_indices = Vec::new();
@@ -208,7 +208,7 @@ mod tests {
             let index = wordlist.get_index(word).expect("单词不在词表中");
             word_indices.push(index as u32);
         }
-        
+
         println!("单词索引: {:?}", word_indices);
 
         // CPU端计算

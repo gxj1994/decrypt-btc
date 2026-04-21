@@ -64,7 +64,7 @@ pub fn create_test_config_with_password(
     let words: Vec<&str> = mnemonic.split_whitespace().collect();
     let mut word_positions = HashMap::new();
     for (i, word) in words.iter().enumerate() {
-        let key = format!("word{}", i);  // 0-based: word0, word1, ..., word11
+        let key = format!("word{}", i); // 0-based: word0, word1, ..., word11
         word_positions.insert(key, vec![word.to_string()]);
     }
 
@@ -96,7 +96,7 @@ pub fn create_test_config_with_candidates(
     let mut word_positions = HashMap::new();
 
     for i in 0..mnemonic_size {
-        let key = format!("word{}", i);  // 0-based格式
+        let key = format!("word{}", i); // 0-based格式
 
         if let Some(pos) = wrong_positions.iter().position(|&x| x == i) {
             // 这个位置包含正确词 + 干扰词
@@ -185,20 +185,20 @@ pub fn add_noise_words(
     noise_counts: &[usize],
 ) -> Result<Config, Box<dyn std::error::Error>> {
     use rand::thread_rng;
-    
+
     let mut new_config = base_config.clone();
     let mut rng = thread_rng();
-    
+
     // 加载单词表
     let wordlist = decrypt_btc::mnemonic::Bip39Wordlist::load("data/english.txt")?;
-    
+
     for (idx, &pos) in positions.iter().enumerate() {
         let key = format!("word{}", pos);
         if let Some(original_words) = new_config.word_positions.get_mut(&key) {
             // 为每个原始词添加干扰词
             let noise_count = noise_counts[idx];
             let mut new_candidates = original_words.clone();
-            
+
             for _ in 0..noise_count {
                 // 随机选择一个不同的单词
                 loop {
@@ -212,11 +212,11 @@ pub fn add_noise_words(
                     }
                 }
             }
-            
+
             new_config.word_positions.insert(key, new_candidates);
         }
     }
-    
+
     Ok(new_config)
 }
 
@@ -240,30 +240,35 @@ pub fn build_full_mnemonic(config: &Config) -> String {
 /// * `should_find` - 是否应该找到匹配
 pub fn run_gpu_search_test(config: &Config, test_name: &str, should_find: bool) {
     let full_mnemonic = build_full_mnemonic(config);
-    
+
     println!("\n[测试配置]");
     println!("助记词长度: {} 位", config.mnemonic_size);
     println!("助记词: {}", full_mnemonic);
-    println!("密码: '{}'", if !config.passwords.is_empty() { &config.passwords[0] } else { "" });
+    println!(
+        "密码: '{}'",
+        if !config.passwords.is_empty() {
+            &config.passwords[0]
+        } else {
+            ""
+        }
+    );
     println!("目标地址: {}", config.target_address);
-    
+
     // CPU端验证
     println!("\n[CPU端计算]");
     let cpu_address = if !config.passwords.is_empty() {
-        mnemonic_to_address(&full_mnemonic, &config.passwords[0])
-            .expect("CPU地址计算失败")
+        mnemonic_to_address(&full_mnemonic, &config.passwords[0]).expect("CPU地址计算失败")
     } else {
-        mnemonic_to_address(&full_mnemonic, "")
-            .expect("CPU地址计算失败")
+        mnemonic_to_address(&full_mnemonic, "").expect("CPU地址计算失败")
     };
     println!("CPU地址: {}", cpu_address);
-    
+
     // GPU端搜索
     println!("\n[GPU端计算]");
-    let mut searcher = decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(config)
-        .expect("GPU搜索器初始化失败");
+    let mut searcher =
+        decrypt_btc::opencl::gpu_searcher::GpuSearcher::new(config).expect("GPU搜索器初始化失败");
     let results = searcher.search(config, None).expect("GPU搜索失败");
-    
+
     // 显示性能统计
     let stats = &searcher.stats;
     println!("\n[GPU性能统计]");
@@ -273,11 +278,14 @@ pub fn run_gpu_search_test(config: &Config, test_name: &str, should_find: bool) 
     if stats.attempts_per_second > 1000.0 && stats.attempts_per_second < 1000000.0 {
         println!("搜索速度: {:.2} KH/s", stats.attempts_per_second / 1000.0);
     } else if stats.attempts_per_second >= 1000000.0 {
-        println!("搜索速度: {:.2} MH/s", stats.attempts_per_second / 1000000.0);
+        println!(
+            "搜索速度: {:.2} MH/s",
+            stats.attempts_per_second / 1000000.0
+        );
     }
-    
+
     println!("\n[GPU结果] 找到 {} 个匹配", results.len());
-    
+
     if should_find {
         assert!(!results.is_empty(), "GPU应该找到匹配");
         if !results.is_empty() {

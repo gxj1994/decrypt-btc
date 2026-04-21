@@ -17,11 +17,11 @@ pub struct GpuSearchResult {
 /// GPU搜索性能统计
 #[derive(Debug, Clone)]
 pub struct GpuSearchStats {
-    pub total_attempts: u64,        // 总尝试次数
-    pub elapsed_secs: f64,          // 总耗时（秒）
-    pub attempts_per_second: f64,   // 每秒尝试次数
-    pub kernel_compile_secs: f64,   // 内核编译耗时
-    pub execution_secs: f64,        // GPU执行耗时
+    pub total_attempts: u64,      // 总尝试次数
+    pub elapsed_secs: f64,        // 总耗时（秒）
+    pub attempts_per_second: f64, // 每秒尝试次数
+    pub kernel_compile_secs: f64, // 内核编译耗时
+    pub execution_secs: f64,      // GPU执行耗时
 }
 
 /// GPU搜索器
@@ -30,12 +30,12 @@ pub struct GpuSearcher {
     kernel: Kernel,
     word_indices_buffer: Buffer<u32>,
     target_hash_buffer: Buffer<u8>,
-    salt_buffer: Buffer<u8>,              // 预计算的salt缓冲区
+    salt_buffer: Buffer<u8>, // 预计算的salt缓冲区
     result_buffer: Buffer<u32>,
-    flag_buffer: Buffer<u32>,             // 统计计数器（改为u32类型）
+    flag_buffer: Buffer<u32>, // 统计计数器（改为u32类型）
     mnemonic_size: usize,
-    salt_len: u32,                        // salt长度
-    pub stats: GpuSearchStats,            // 性能统计
+    salt_len: u32,             // salt长度
+    pub stats: GpuSearchStats, // 性能统计
 }
 
 impl GpuSearcher {
@@ -44,24 +44,30 @@ impl GpuSearcher {
         // 根据config的mnemonic_size动态编译内核
         Self::new_with_config(config)
     }
-        
+
     /// 创建GPU搜索器（指定助记词长度）
-    pub fn new_with_mnemonic_size(mnemonic_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new_with_mnemonic_size(
+        mnemonic_size: usize,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // 创建一个默认config，仅用于初始化
+        use std::collections::HashMap;
+        let mut word_positions = HashMap::new();
+        for i in 0..mnemonic_size {
+            word_positions.insert(format!("word{}", i), vec!["abandon".to_string()]);
+        }
         let config = Config {
             mnemonic_size,
             passwords: vec![],
-            target_address: "1KddEkd2fiWuibkSmK1ASBpjpTDjmAZTKs".to_string(), // 默认地址
-            word_positions: std::collections::HashMap::new(),
+            target_address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa".to_string(),
+            word_positions,
         };
         Self::new_with_config(&config)
     }
-    
+
     /// 创建GPU搜索器（完整配置）
     pub fn new_with_config(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
         let mnemonic_size = config.mnemonic_size;
         info!("[GPU] 初始化GPU搜索器 (mnemonic_size={})...", mnemonic_size);
-        info!("[GPU] 初始化GPU搜索器...");
 
         // 1. 获取GPU设备
         let platforms = Platform::list();
@@ -69,15 +75,13 @@ impl GpuSearcher {
             return Err("未找到OpenCL平台".into());
         }
 
-        info!("[GPU] 找到 {} 个OpenCL平台", platforms.len());
-
         // 选择第一个平台的第一个GPU设备
         let mut selected_device: Option<Device> = None;
         let mut selected_platform: Option<Platform> = None;
 
         for platform in &platforms {
             let devices = Device::list_all(platform)?;
-            info!(
+            debug!(
                 "[GPU] 平台: {:?}, 设备数: {}",
                 platform.name(),
                 devices.len()
@@ -86,7 +90,7 @@ impl GpuSearcher {
             for device in devices {
                 let device_name = device.name()?;
                 let device_type = Self::get_device_type(&device)?;
-                info!("[GPU]   设备: {} (类型: {})", device_name, device_type);
+                debug!("[GPU]   设备: {} (类型: {})", device_name, device_type);
 
                 // Apple Silicon的GPU可能被识别为GPU或其他类型
                 // 优先选择GPU，如果没有则选择第一个设备
@@ -131,7 +135,7 @@ impl GpuSearcher {
 
         // 4. 预计算目标哈希（优化：在初始化时上传，避免每次search重复上传）
         let target_hash = Self::decode_target_address_static(&config.target_address)?;
-        info!("[GPU] 目标哈希已预计算: {:?}", &target_hash[..8]);
+        debug!("[GPU] 目标哈希已预计算: {:?}", &target_hash[..8]);
 
         let result_size = 1024; // 结果缓冲区大小
         let result_buffer = Buffer::<u32>::builder()
@@ -149,7 +153,7 @@ impl GpuSearcher {
             .flags(ocl::flags::MEM_READ_WRITE)
             .len(1)
             .build()?;
-        
+
         // 初始化统计计数器为0
         let initial_stats: Vec<u32> = vec![0];
         flag_buffer.write(&initial_stats).enq()?;
@@ -170,7 +174,7 @@ impl GpuSearcher {
             .flags(ocl::flags::MEM_READ_ONLY)
             .len(20)
             .build()?;
-        
+
         // 初始化时即上传目标哈希（优化2）
         target_hash_buffer.write(&target_hash).enq()?;
         debug!("[GPU] 目标哈希已在初始化时上传到GPU");
@@ -181,7 +185,6 @@ impl GpuSearcher {
             .flags(ocl::flags::MEM_READ_ONLY)
             .len(256)
             .build()?;
-
 
         // 5. 创建内核（6个参数）
         let kernel = Kernel::builder()
@@ -197,7 +200,7 @@ impl GpuSearcher {
             .arg(&flag_buffer) // 参数6: stats_counter
             .build()?;
 
-        info!("[GPU] GPU搜索器初始化完成");
+        debug!("[GPU] GPU搜索器初始化完成");
 
         Ok(Self {
             queue,
@@ -239,12 +242,15 @@ impl GpuSearcher {
     }
 
     /// 编译内核程序
-    fn compile_kernel_program(context: &Context, mnemonic_size: usize) -> Result<Program, Box<dyn std::error::Error>> {
-        info!("[GPU] 编译内核程序 (MNEMONIC_SIZE={})...", mnemonic_size);
+    fn compile_kernel_program(
+        context: &Context,
+        mnemonic_size: usize,
+    ) -> Result<Program, Box<dyn std::error::Error>> {
+        debug!("[GPU] 编译内核程序 (MNEMONIC_SIZE={})...", mnemonic_size);
 
         // 添加MNEMONIC_SIZE宏定义
         let mut source = format!("#define MNEMONIC_SIZE {}\n\n", mnemonic_size);
-        
+
         // 按顺序加载所有内核文件
         let kernel_files = vec![
             "kernels/crypto/sha256.cl",
@@ -259,18 +265,16 @@ impl GpuSearcher {
         ];
 
         for file in &kernel_files {
-            debug!("[GPU] 加载: {}", file);
             let content = std::fs::read_to_string(file)?;
             source.push_str(&content);
-            source.push_str("\n\n");
         }
 
-        info!("[GPU] 内核源代码总长度: {} 字符", source.len());
-        info!("[GPU] 编译中...");
+        debug!("[GPU] 内核源代码总长度: {} 字符", source.len());
+        debug!("[GPU] 编译中...");
 
         let program = Program::builder().src(&source).build(context)?;
 
-        info!("[GPU] 编译完成");
+        debug!("[GPU] 编译完成");
 
         Ok(program)
     }
@@ -279,11 +283,11 @@ impl GpuSearcher {
     pub fn search(
         &mut self,
         config: &Config,
-        candidates: Option<&[Vec<u16>]>,  // 可选的预生成候选词
+        candidates: Option<&[Vec<u16>]>, // 可选的预生成候选词
     ) -> Result<Vec<GpuSearchResult>, Box<dyn std::error::Error>> {
         use std::time::Instant;
-        
-        info!("[GPU] 开始搜索...");
+
+        debug!("[GPU] 开始搜索...");
         let search_start = Instant::now();
 
         // 1. 准备助记词索引数据（使用预生成的candidates或从config构建）
@@ -292,14 +296,10 @@ impl GpuSearcher {
         } else {
             self.prepare_word_indices(config)?
         };
-        info!("[GPU] 准备 {} 个助记词索引", word_indices.len());
+        debug!("[GPU] 准备 {} 个助记词索引", word_indices.len());
 
         // 2. 上传word_indices到GPU
         self.word_indices_buffer.write(&word_indices).enq()?;
-        debug!("[GPU] 助记词索引已上传到GPU");
-
-        // 3. 目标哈希已在初始化时上传（优化2），无需重复上传
-        debug!("[GPU] 目标哈希已在初始化时预上传");
 
         // 5. 准备salt（预计算 "mnemonic" + passphrase）
         let salt = if !config.passwords.is_empty() {
@@ -311,10 +311,9 @@ impl GpuSearcher {
         } else {
             b"mnemonic".to_vec()
         };
-        
+
         self.salt_len = salt.len() as u32;
         self.salt_buffer.write(&salt).enq()?;
-        debug!("[GPU] Salt已预计算并上传到GPU，长度: {}", self.salt_len);
 
         // 6. 计算工作项数量（使用candidates或从config计算）
         let work_items = if let Some(cands) = candidates {
@@ -343,12 +342,12 @@ impl GpuSearcher {
         unsafe {
             self.kernel.cmd().global_work_size(global_work_size).enq()?;
         }
-        info!("[GPU] 内核已启动");
+        debug!("[GPU] 内核已启动");
 
         // 5. 等待完成
         self.queue.finish()?;
         let kernel_elapsed = kernel_start.elapsed().as_secs_f64();
-        info!("[GPU] 内核执行完成，耗时: {:.3}秒", kernel_elapsed);
+        debug!("[GPU] 内核执行完成，耗时: {:.3}秒", kernel_elapsed);
 
         // 7. 读取结果
         let mut result_data = vec![0u32; 1024];
@@ -359,11 +358,10 @@ impl GpuSearcher {
         let mut stats_data = vec![0u32; 1];
         self.flag_buffer.read(&mut stats_data).enq()?;
         self.queue.finish()?;
-        
-        let total_attempts = stats_data[0] as u64;
-        info!("[GPU] 总尝试次数: {}", total_attempts);
 
-        info!(
+        let total_attempts = stats_data[0] as u64;
+
+        debug!(
             "[GPU] 结果缓冲区（DEBUG）: magic={:#X}, pubkey_hash={:?}, word_indices={:?}",
             result_data[0],
             &result_data[1..21],
@@ -373,7 +371,7 @@ impl GpuSearcher {
         // 9. 解析结果
         let results = self.parse_results(&result_data, config)?;
         info!("[GPU] 找到匹配: {} 个", results.len());
-        
+
         // 10. 计算性能统计
         let total_elapsed = search_start.elapsed().as_secs_f64();
         let aps = if total_elapsed > 0.0 {
@@ -381,7 +379,7 @@ impl GpuSearcher {
         } else {
             0.0
         };
-        
+
         self.stats = GpuSearchStats {
             total_attempts,
             elapsed_secs: total_elapsed,
@@ -389,19 +387,6 @@ impl GpuSearcher {
             kernel_compile_secs: 0.0, // 编译时间在初始化时已完成
             execution_secs: kernel_elapsed,
         };
-        
-        info!("[GPU] ========== 性能统计 ==========");
-        info!("[GPU] 总尝试次数: {}", total_attempts);
-        info!("[GPU] 总耗时: {:.3} 秒", total_elapsed);
-        info!("[GPU] GPU执行时间: {:.3} 秒", kernel_elapsed);
-        info!("[GPU] 速度: {:.0} H/s (attempts/second)", aps);
-        if aps > 1000.0 {
-            info!("[GPU] 速度: {:.2} KH/s", aps / 1000.0);
-        }
-        if aps > 1000000.0 {
-            info!("[GPU] 速度: {:.2} MH/s", aps / 1000000.0);
-        }
-        info!("[GPU] =====================================");
 
         Ok(results)
     }
@@ -421,7 +406,7 @@ impl GpuSearcher {
             .into());
         }
 
-        info!(
+        debug!(
             "[GPU] Base58Check解码成功，pubkey_hash: {:02x?}",
             &pubkey_hash[..8]
         );
@@ -429,7 +414,7 @@ impl GpuSearcher {
     }
 
     /// 准备助记词索引数组
-    /// 
+    ///
     /// 数据格式：[位置1候选数量, 位置1候选1, 位置1候选2, ..., 位置2候选数量, ...]
     /// GPU根据global_id动态计算每个位置应该选哪个候选词
     fn prepare_word_indices(
@@ -446,23 +431,27 @@ impl GpuSearcher {
         // 遍历每个位置（配置使用word0-word11，0-based索引）
         for i in 0..config.mnemonic_size {
             let key = format!("word{}", i);
-            
+
             // 获取候选词列表
             let candidates = if let Some(words) = config.word_positions.get(&key) {
                 if words.is_empty() {
                     // 空数组表示使用全部2048个单词
-                    (0..2048).map(|idx| wordlist.get_word(idx).unwrap().to_string()).collect::<Vec<_>>()
+                    (0..2048)
+                        .map(|idx| wordlist.get_word(idx).unwrap().to_string())
+                        .collect::<Vec<_>>()
                 } else {
                     words.clone()
                 }
             } else {
                 // 如果配置中不存在该key，也使用全部2048个单词
-                (0..2048).map(|idx| wordlist.get_word(idx).unwrap().to_string()).collect::<Vec<_>>()
+                (0..2048)
+                    .map(|idx| wordlist.get_word(idx).unwrap().to_string())
+                    .collect::<Vec<_>>()
             };
-            
+
             // 先写入候选词数量
             indices.push(candidates.len() as u32);
-            
+
             // 再写入每个候选词的索引
             for word in &candidates {
                 if let Some(index) = wordlist.get_index(word) {
@@ -492,7 +481,7 @@ impl GpuSearcher {
         for position_candidates in candidates {
             // 先写入候选词数量
             indices.push(position_candidates.len() as u32);
-            
+
             // 再写入每个候选词的索引
             for &word_index in position_candidates {
                 indices.push(word_index as u32);
@@ -519,11 +508,11 @@ impl GpuSearcher {
     /// 计算工作项数量
     fn calculate_work_items(&self, config: &Config) -> usize {
         let mut work_items: usize = 1;
-        
+
         // 遍历每个位置（配置使用word0-word11，0-based索引）
         for i in 0..config.mnemonic_size {
             let key = format!("word{}", i);
-            
+
             // 获取候选词数量
             let count = if let Some(words) = config.word_positions.get(&key) {
                 if words.is_empty() {
@@ -536,10 +525,10 @@ impl GpuSearcher {
                 // 如果配置中不存在该key，也使用全部2048个单词
                 2048
             };
-            
+
             work_items = work_items.saturating_mul(count);
         }
-        
+
         work_items
     }
 
@@ -564,7 +553,9 @@ impl GpuSearcher {
         let wordlist = Bip39Wordlist::load("data/english.txt")?;
 
         // 解析每个结果
-        let result_size = self.mnemonic_size + 1; // 助记词索引 + 工作项索引
+        // GPU内核格式：result_buffer[1 + result_idx * (MNEMONIC_SIZE + 2)] = global_id
+        //              result_buffer[1 + result_idx * (MNEMONIC_SIZE + 2) + 1 + i] = 助记词索引
+        let result_size = self.mnemonic_size + 2; // global_id + 助记词索引 + 1个额外空间
         for i in 0..result_count {
             let offset = 1 + i * result_size;
 
@@ -572,7 +563,7 @@ impl GpuSearcher {
                 break;
             }
 
-            let work_item_index = result_data[offset];
+            let work_item_index = result_data[offset]; // global_id
 
             // 构建助记词字符串
             let mut mnemonic_parts = Vec::new();
@@ -592,6 +583,13 @@ impl GpuSearcher {
             } else {
                 "".to_string()
             };
+
+            info!(
+                "[GPU] ✅ 找到匹配 #{}: work_item={}, 助记词={}",
+                i + 1,
+                work_item_index,
+                mnemonic
+            );
 
             results.push(GpuSearchResult {
                 mnemonic,

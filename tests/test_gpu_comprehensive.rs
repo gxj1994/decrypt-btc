@@ -8,7 +8,7 @@ use rand::thread_rng;
 #[test]
 fn test_mnemonic_12_no_password() {
     println!("\n=== 测试: 12位助记词（无密码） ===");
-    
+
     let config = create_simple_test_config(Some(12)).unwrap();
     run_gpu_search_test(&config, "12位助记词-无密码", true);
 }
@@ -17,7 +17,7 @@ fn test_mnemonic_12_no_password() {
 #[test]
 fn test_mnemonic_15_no_password() {
     println!("\n=== 测试: 15位助记词（无密码） ===");
-    
+
     let config = create_simple_test_config(Some(15)).unwrap();
     run_gpu_search_test(&config, "15位助记词-无密码", true);
 }
@@ -26,7 +26,7 @@ fn test_mnemonic_15_no_password() {
 #[test]
 fn test_mnemonic_18_no_password() {
     println!("\n=== 测试: 18位助记词（无密码） ===");
-    
+
     let config = create_simple_test_config(Some(18)).unwrap();
     run_gpu_search_test(&config, "18位助记词-无密码", true);
 }
@@ -35,7 +35,7 @@ fn test_mnemonic_18_no_password() {
 #[test]
 fn test_mnemonic_24_no_password() {
     println!("\n=== 测试: 24位助记词（无密码） ===");
-    
+
     let config = create_simple_test_config(Some(24)).unwrap();
     run_gpu_search_test(&config, "24位助记词-无密码", true);
 }
@@ -44,7 +44,7 @@ fn test_mnemonic_24_no_password() {
 #[test]
 fn test_mnemonic_12_with_password() {
     println!("\n=== 测试: 12位助记词（带密码） ===");
-    
+
     let config = create_test_config_with_password(Some(12), "my_secret_password").unwrap();
     run_gpu_search_test(&config, "12位助记词-带密码", true);
 }
@@ -53,7 +53,7 @@ fn test_mnemonic_12_with_password() {
 #[test]
 fn test_mnemonic_15_with_password() {
     println!("\n=== 测试: 15位助记词（带密码） ===");
-    
+
     let config = create_test_config_with_password(Some(15), "test_passphrase_123").unwrap();
     run_gpu_search_test(&config, "15位助记词-带密码", true);
 }
@@ -62,7 +62,7 @@ fn test_mnemonic_15_with_password() {
 #[test]
 fn test_mnemonic_18_with_password() {
     println!("\n=== 测试: 18位助记词（带密码） ===");
-    
+
     let config = create_test_config_with_password(Some(18), "longer_password_string").unwrap();
     run_gpu_search_test(&config, "18位助记词-带密码", true);
 }
@@ -71,8 +71,9 @@ fn test_mnemonic_18_with_password() {
 #[test]
 fn test_mnemonic_24_with_password() {
     println!("\n=== 测试: 24位助记词（带密码） ===");
-    
-    let config = create_test_config_with_password(Some(24), "very_long_password_for_24_words").unwrap();
+
+    let config =
+        create_test_config_with_password(Some(24), "very_long_password_for_24_words").unwrap();
     run_gpu_search_test(&config, "24位助记词-带密码", true);
 }
 
@@ -80,10 +81,10 @@ fn test_mnemonic_24_with_password() {
 #[test]
 fn test_12_mnemonic_1_noise_word() {
     println!("\n=== 测试: 12位助记词（1个干扰词） ===");
-    
+
     let config = create_simple_test_config(Some(12)).unwrap();
     let config_with_noise = add_noise_words(&config, &[2], &[1]).unwrap();
-    
+
     println!("搜索空间: 2种组合（位置2有2个候选词）");
     run_gpu_search_test(&config_with_noise, "12位-1个干扰词", true);
 }
@@ -92,10 +93,10 @@ fn test_12_mnemonic_1_noise_word() {
 #[test]
 fn test_12_mnemonic_2_noise_words() {
     println!("\n=== 测试: 12位助记词（2个干扰词） ===");
-    
+
     let config = create_simple_test_config(Some(12)).unwrap();
     let config_with_noise = add_noise_words(&config, &[3, 7], &[1, 1]).unwrap();
-    
+
     println!("搜索空间: 4种组合（2^2）");
     run_gpu_search_test(&config_with_noise, "12位-2个干扰词", true);
 }
@@ -104,10 +105,10 @@ fn test_12_mnemonic_2_noise_words() {
 #[test]
 fn test_15_mnemonic_2_positions_3_candidates() {
     println!("\n=== 测试: 15位助记词（2个位置，每位置3个候选） ===");
-    
+
     let config = create_simple_test_config(Some(15)).unwrap();
     let config_with_noise = add_noise_words(&config, &[4, 10], &[2, 2]).unwrap();
-    
+
     println!("搜索空间: 9种组合（3^2）");
     run_gpu_search_test(&config_with_noise, "15位-2位置3候选", true);
 }
@@ -116,10 +117,10 @@ fn test_15_mnemonic_2_positions_3_candidates() {
 #[test]
 fn test_18_mnemonic_3_noise_words() {
     println!("\n=== 测试: 18位助记词（3个干扰词） ===");
-    
+
     let config = create_simple_test_config(Some(18)).unwrap();
     let config_with_noise = add_noise_words(&config, &[2, 8, 15], &[1, 1, 1]).unwrap();
-    
+
     println!("搜索空间: 8种组合（2^3）");
     run_gpu_search_test(&config_with_noise, "18位-3个干扰词", true);
 }
@@ -128,10 +129,10 @@ fn test_18_mnemonic_3_noise_words() {
 #[test]
 fn test_24_mnemonic_2_noise_words() {
     println!("\n=== 测试: 24位助记词（2个干扰词） ===");
-    
+
     let config = create_simple_test_config(Some(24)).unwrap();
     let config_with_noise = add_noise_words(&config, &[5, 20], &[1, 1]).unwrap();
-    
+
     println!("搜索空间: 4种组合（2^2）");
     run_gpu_search_test(&config_with_noise, "24位-2个干扰词", true);
 }
@@ -140,13 +141,17 @@ fn test_24_mnemonic_2_noise_words() {
 #[test]
 fn test_12_mnemonic_random_replacement() {
     println!("\n=== 测试: 12位助记词（随机2-3个位置替换） ===");
-    
+
     let config = create_simple_test_config(Some(12)).unwrap();
-    
+
     // 随机选择2-3个位置
     let mut rng = thread_rng();
-    let num_positions = if rand::Rng::gen_range(&mut rng, 0..2) == 0 { 2 } else { 3 };
-    
+    let num_positions = if rand::Rng::gen_range(&mut rng, 0..2) == 0 {
+        2
+    } else {
+        3
+    };
+
     let mut positions = Vec::new();
     let mut noise_counts = Vec::new();
     for _ in 0..num_positions {
@@ -154,10 +159,13 @@ fn test_12_mnemonic_random_replacement() {
         positions.push(pos);
         noise_counts.push(1); // 每个位置加1个干扰词
     }
-    
+
     let config_with_noise = add_noise_words(&config, &positions, &noise_counts).unwrap();
-    
-    println!("搜索空间: {}种组合", calculate_search_space(&config_with_noise));
+
+    println!(
+        "搜索空间: {}种组合",
+        calculate_search_space(&config_with_noise)
+    );
     run_gpu_search_test(&config_with_noise, "12位-随机替换", true);
 }
 
@@ -165,10 +173,10 @@ fn test_12_mnemonic_random_replacement() {
 #[test]
 fn test_large_search_space_16_combinations() {
     println!("\n=== 测试: 大搜索空间（16种组合） ===");
-    
+
     let config = create_simple_test_config(Some(12)).unwrap();
     let config_with_noise = add_noise_words(&config, &[0, 3, 6, 9], &[1, 1, 1, 1]).unwrap();
-    
+
     println!("搜索空间: 16种组合（2^4）");
     run_gpu_search_test(&config_with_noise, "大搜索空间-16组合", true);
 }
@@ -177,10 +185,10 @@ fn test_large_search_space_16_combinations() {
 #[test]
 fn test_medium_search_space_27_combinations() {
     println!("\n=== 测试: 中等搜索空间（27种组合） ===");
-    
+
     let config = create_simple_test_config(Some(12)).unwrap();
     let config_with_noise = add_noise_words(&config, &[1, 5, 10], &[2, 2, 2]).unwrap();
-    
+
     println!("搜索空间: 27种组合（3^3）");
     run_gpu_search_test(&config_with_noise, "中等搜索空间-27组合", true);
 }

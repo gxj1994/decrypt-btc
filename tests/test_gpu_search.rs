@@ -286,7 +286,7 @@ fn test_gpu_multiple_passwords() {
     let config = decrypt_btc::config::Config {
         mnemonic_size: 12,
         passwords: vec![
-            correct_passphrase.to_string(),  // 当前GPU只测试第一个密码
+            correct_passphrase.to_string(), // 当前GPU只测试第一个密码
         ],
         target_address: address,
         word_positions,
