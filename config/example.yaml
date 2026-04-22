@@ -6,28 +6,28 @@ mnemonic_size: 12
 # 密码列表（可选）
 # 空数组 [] 表示不使用密码
 # 示例: ["mypass", "password123"]
-passwords: []
+passwords: ["123456789"]
 
 # 目标BTC地址（Legacy格式，以1开头）
-# kind pride salon echo next parent submit general blade lunch season body
-target_address: "1C9mTDd3YR7oFDpGZ352VhD27HUyKXHzyQ"
+# tennis endless there vote hawk derive remind mandate couch okay gate grief
+target_address: "1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gN"
 
 # 每位助记词的候选词列表
 # 空数组 [] 表示使用全部2048个BIP39单词
-# 配置示例: ["kind", "ability", "able", "about"]
+# 配置示例: ["kind", "tennis", "able", "endless"]
 word_positions:
-  word0: ["kind"]   # 第1位助记词候选列表
-  word1: ["pride"]   # 第2位助记词候选列表
-  word2: ["salon"]   # 第3位助记词候选列表
+  word0: ["tennis"]   # 第1位助记词候选列表
+  word1: ["endless"]   # 第2位助记词候选列表
+  word2: ["there"]   # 第3位助记词候选列表
   word3: []         # 第4位助记词候选列表
-  word4: ["next"]   # 第5位助记词候选列表
-  word5: ["parent"]   # 第6位助记词候选列表
-  word6: ["submit"]   # 第7位助记词候选列表
-  word7: ["general"]   # 第8位助记词候选列表
-  word8: ["blade"]   # 第9位助记词候选列表
-  word9: ["lunch"]   # 第10位助记词候选列表
-  word10: ["season"]  # 第11位助记词候选列表
-  word11: ["body"]  # 第12位助记词候选列表（会被校验位过滤）
+  word4: ["hawk"]   # 第5位助记词候选列表
+  word5: ["derive"]   # 第6位助记词候选列表
+  word6: ["remind"]   # 第7位助记词候选列表
+  word7: ["mandate"]   # 第8位助记词候选列表
+  word8: ["couch"]   # 第9位助记词候选列表
+  word9: ["okay"]   # 第10位助记词候选列表
+  word10: ["gate"]  # 第11位助记词候选列表
+  word11: ["grief"]  # 第12位助记词候选列表（会被校验位过滤）
 
 # 说明：
 # 1. 根据猜谜线索配置高概率的候选词
