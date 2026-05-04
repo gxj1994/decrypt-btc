@@ -71,7 +71,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         log::error!("");
         log::error!("请缩小候选词范围，或使用 --max-search-space 参数调整限制");
-        log::error!("示例: decrypt-btc --gpu --max-search-space 10000000");
+        log::error!("示例: decrypt-btc --max-search-space 10000000");
+        log::error!("取消限制: decrypt-btc --max-search-space 0");
         return Err("搜索空间超过限制，程序退出".into());
     }
 
