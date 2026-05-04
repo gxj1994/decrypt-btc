@@ -58,7 +58,7 @@ cargo run --release
 # 使用自定义配置
 cargo run --release -- --config ./config/example.yaml
 
-# 调整搜索空间限制为1000万
+# 调整搜索空间限制为1000万, 设置0则忽略限制
 cargo run --release -- --max-search-space 10000000
 
 # 自定义GPU批处理大小
@@ -71,7 +71,7 @@ cargo run --release -- --batch-size 50000
 Options:
   -c, --config <CONFIG>              配置文件路径 [default: config/example.yaml]
       --batch-size <BATCH_SIZE>      GPU批处理大小 [default: 10000]
-      --max-search-space <LIMIT>     最大搜索空间限制 [default: 5000000]
+      --max-search-space <LIMIT>     最大搜索空间限制 [default: 5000000], 设置0则忽略限制
   -h, --help                         显示帮助信息
   -V, --version                      显示版本信息
 ```

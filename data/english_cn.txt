@@ -7,7 +7,7 @@ absent,缺席的
 absorb,吸收
 abstract,抽象的
 absurd,荒诞
-abuse,虐待
+abuse,滥用
 access,使用权
 accident,事故
 account,帐户

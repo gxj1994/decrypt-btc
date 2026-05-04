@@ -21,6 +21,7 @@ struct Args {
 
     /// Maximum search space limit (default: 5,000,000)
     /// If calculated search space exceeds this, the program will warn and exit
+    /// Set to 0 to disable the search space limit
     #[arg(long, default_value = "5000000")]
     max_search_space: u64,
 }
@@ -57,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 检查搜索空间是否超过限制
-    if search_space > args.max_search_space {
+    if args.max_search_space > 0 && search_space > args.max_search_space {
         log::error!("❌ 搜索空间过大！");
         log::error!("   计算得到的搜索空间: {:.2e}", search_space as f64);
         log::error!(
