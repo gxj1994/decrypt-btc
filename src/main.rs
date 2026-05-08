@@ -7,7 +7,7 @@ use decrypt_btc::opencl::gpu_searcher::GpuSearcher;
 
 #[derive(Parser, Debug)]
 #[command(name = "decrypt-btc")]
-#[command(author = "Your Name")]
+#[command(author = "acher")]
 #[command(version = "0.1.0")]
 #[command(about = "BTC mnemonic brute-force tool with GPU acceleration", long_about = None)]
 struct Args {

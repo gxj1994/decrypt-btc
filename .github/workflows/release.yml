@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  BINARY_NAME: decrypt-btc
+
+jobs:
+  # ─────────────────────────────── 编译 + 打包 ───────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: ""
+            pkg-arch: linux-amd64
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            suffix: ""
+            pkg-arch: linux-arm64
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            suffix: ""
+            pkg-arch: macos-amd64
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            suffix: ""
+            pkg-arch: macos-arm64
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: ".exe"
+            pkg-arch: windows-amd64
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 安装交叉编译依赖（ARM Linux）
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: 安装 OpenCL 依赖（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            ocl-icd-opencl-dev \
+            opencl-headers \
+            pkg-config \
+            libssl-dev
+
+      - name: 安装 OpenCL 依赖（macOS）
+        if: runner.os == 'macOS'
+        run: brew install ocl-icd || true
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: 编译（release）
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
+
+      - name: 打包（Linux/macOS）
+        if: runner.os != 'Windows'
+        run: |
+          PKG_DIR="${{ matrix.pkg-arch }}"
+          mkdir -p "$PKG_DIR"
+          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.suffix }} "$PKG_DIR/"
+          cp -r config "$PKG_DIR/"
+          cp -r data "$PKG_DIR/"
+          cp README.md "$PKG_DIR/"
+          tar czf "${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}.tar.gz" "$PKG_DIR/"
+          rm -rf "$PKG_DIR"
+
+      - name: 打包（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pkgDir = "${{ matrix.pkg-arch }}"
+          New-Item -ItemType Directory -Force -Path $pkgDir
+          Copy-Item "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.suffix }}" "$pkgDir/"
+          Copy-Item "config" "$pkgDir/" -Recurse
+          Copy-Item "data" "$pkgDir/" -Recurse
+          Copy-Item "README.md" "$pkgDir/"
+          Compress-Archive -Path "$pkgDir/*" -DestinationPath "${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}.zip"
+          Remove-Item -Recurse -Force $pkgDir
+
+      - name: 上传打包产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}
+          path: ${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}.*
+          retention-days: 1
+          if-no-files-found: error
+
+  # ─────────────────────────────── 创建 GitHub Release ───────────────────────────────
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: ${{ env.BINARY_NAME }}-*
+          merge-multiple: true
+
+      - name: 列出待上传文件
+        run: ls -lh artifacts/
+
+      - name: 校验 Release Tag
+        run: |
+          echo "Release tag: ${{ github.ref_name }}"
+          echo "Triggered by: ${{ github.actor }}"
+
+      - name: 创建 Release 并上传附件
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## decrypt-btc ${{ github.ref_name }}
+
+            ### 📦 下载
+            请根据你的操作系统和架构选择对应文件：
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Linux | x86_64 | `decrypt-btc-linux-amd64.tar.gz` |
+            | Linux | ARM64 | `decrypt-btc-linux-arm64.tar.gz` |
+            | macOS | Intel | `decrypt-btc-macos-amd64.tar.gz` |
+            | macOS | Apple Silicon | `decrypt-btc-macos-arm64.tar.gz` |
+            | Windows | x86_64 | `decrypt-btc-windows-amd64.zip` |
+
+            ### 🚀 使用说明
+            解压后运行二进制文件，参考 README.md 中的详细用法。
+
+            > ⚠️ Linux 用户需要安装 OpenCL 运行时才能使用 GPU 加速功能。
+          artifacts: "artifacts/*"
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          token: ${{ secrets.GITHUB_TOKEN }}

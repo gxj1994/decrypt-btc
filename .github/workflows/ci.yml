@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ─────────────────────────────── 代码检查 ───────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 代码格式化检查
+        run: cargo fmt --all --check
+
+      - name: Clippy 静态分析
+        run: cargo clippy --all-targets -- -D warnings
+
+  # ─────────────────────────────── 编译 + 单元测试 ───────────────────────────────
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 OpenCL 运行时
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            ocl-icd-opencl-dev \
+            opencl-headers \
+            pkg-config \
+            libssl-dev
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 编译（debug）
+        run: cargo build --all-targets
+
+      - name: 运行单元测试
+        run: cargo test --lib -- --nocapture
+
+      - name: 编译（release）
+        run: cargo build --release
+
+  # ─────────────────────────────── macOS 编译 ───────────────────────────────
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 编译（release）
+        run: cargo build --release
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: decrypt-btc-macos
+          path: target/release/decrypt-btc
+          retention-days: 7
+          if-no-files-found: error
+
+  # ─────────────────────────────── Windows 编译 ───────────────────────────────
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 编译（release）
+        run: cargo build --release
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: decrypt-btc-windows
+          path: target/release/decrypt-btc.exe
+          retention-days: 7
+          if-no-files-found: error
