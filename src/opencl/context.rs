@@ -123,10 +123,10 @@ mod tests {
 
     /// 测试 OpenCL 上下文创建。
     ///
-    /// 注意：此测试需要真实的 GPU/OpenCL 设备才能通过。
-    /// 在 CI 环境（如 GitHub Actions）中默认跳过，可通过 `--include-ignored` 手动运行。
+    /// 需要启用 `gpu-tests` feature 才会运行（需要真实的 OpenCL 设备）。
+    /// 用法: `cargo test --features gpu-tests`
     #[test]
-    #[ignore = "需要真实的 OpenCL 设备（GPU）"]
+    #[cfg_attr(not(feature = "gpu-tests"), ignore = "需要 GPU 设备: cargo test --features gpu-tests")]
     fn test_context_creation() {
         let ctx = OpenCLContext::new();
         assert!(ctx.is_ok());

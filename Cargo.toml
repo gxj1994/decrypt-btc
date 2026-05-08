@@ -41,6 +41,27 @@ dotenv = "0.15"
 # 测试工具
 rand = "0.8"
 
+[features]
+# 启用 GPU 测试（需要 OpenCL 设备）
+# 用法: cargo test --features gpu-tests
+gpu-tests = []
+
+[[test]]
+name = "test_gpu_search"
+required-features = ["gpu-tests"]
+
+[[test]]
+name = "test_gpu_comprehensive"
+required-features = ["gpu-tests"]
+
+[[test]]
+name = "test_gpu_debug"
+required-features = ["gpu-tests"]
+
+[[test]]
+name = "test_gpu_performance"
+required-features = ["gpu-tests"]
+
 [dev-dependencies]
 rand = "0.8"
 

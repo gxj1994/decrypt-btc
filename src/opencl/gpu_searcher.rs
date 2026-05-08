@@ -105,7 +105,7 @@ impl GpuSearcher {
                 }
             }
             if selected_device.is_some()
-                && Self::get_device_type(&selected_device.as_ref().unwrap())? == "GPU"
+                && Self::get_device_type(selected_device.as_ref().unwrap())? == "GPU"
             {
                 break;
             }
@@ -195,7 +195,7 @@ impl GpuSearcher {
             .arg(&word_indices_buffer) // 参数1: word_indices
             .arg(&target_hash_buffer) // 参数2: target_hash
             .arg(&salt_buffer) // 参数3: salt (预计算)
-            .arg(&(0u32)) // 参数4: salt_len
+            .arg(0u32) // 参数4: salt_len
             .arg(&result_buffer) // 参数5: result_buffer
             .arg(&flag_buffer) // 参数6: stats_counter
             .build()?;
@@ -332,7 +332,7 @@ impl GpuSearcher {
         self.kernel.set_arg(0, &self.word_indices_buffer)?;
         self.kernel.set_arg(1, &self.target_hash_buffer)?;
         self.kernel.set_arg(2, &self.salt_buffer)?;
-        self.kernel.set_arg(3, &self.salt_len)?;
+        self.kernel.set_arg(3, self.salt_len)?;
         self.kernel.set_arg(4, &self.result_buffer)?;
         self.kernel.set_arg(5, &self.flag_buffer)?; // stats_counter
 

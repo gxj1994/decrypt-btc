@@ -40,11 +40,6 @@ jobs:
             suffix: ""
             pkg-arch: macos-arm64
 
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            suffix: ".exe"
-            pkg-arch: windows-amd64
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -87,8 +82,7 @@ jobs:
         env:
           RUSTFLAGS: "-C target-cpu=native"
 
-      - name: 打包（Linux/macOS）
-        if: runner.os != 'Windows'
+      - name: 打包
         run: |
           PKG_DIR="${{ matrix.pkg-arch }}"
           mkdir -p "$PKG_DIR"
@@ -101,19 +95,6 @@ jobs:
           find "$PKG_DIR" -name "._*" -delete
           tar czf "${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}.tar.gz" "$PKG_DIR/"
           rm -rf "$PKG_DIR"
-
-      - name: 打包（Windows）
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $pkgDir = "${{ matrix.pkg-arch }}"
-          New-Item -ItemType Directory -Force -Path $pkgDir
-          Copy-Item "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.suffix }}" "$pkgDir/"
-          Copy-Item "config" "$pkgDir/" -Recurse
-          Copy-Item "data" "$pkgDir/" -Recurse
-          Copy-Item "README.md" "$pkgDir/"
-          Compress-Archive -Path "$pkgDir/*" -DestinationPath "${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}.zip"
-          Remove-Item -Recurse -Force $pkgDir
 
       - name: 上传打包产物
         uses: actions/upload-artifact@v4
@@ -163,12 +144,13 @@ jobs:
             | Linux | ARM64 | `decrypt-btc-linux-arm64.tar.gz` |
             | macOS | Intel | `decrypt-btc-macos-amd64.tar.gz` |
             | macOS | Apple Silicon | `decrypt-btc-macos-arm64.tar.gz` |
-            | Windows | x86_64 | `decrypt-btc-windows-amd64.zip` |
 
             ### 🚀 使用说明
             解压后运行二进制文件，参考 README.md 中的详细用法。
 
             > ⚠️ Linux 用户需要安装 OpenCL 运行时才能使用 GPU 加速功能。
+            >
+            > ⚠️ Windows 暂不支持（OpenCL 兼容性问题）。
           artifacts: "artifacts/*"
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
