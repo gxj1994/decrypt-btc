@@ -69,7 +69,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
             ocl-icd-opencl-dev \
-            opencl-headers \
+            opencl-c-headers \
             pkg-config \
             libssl-dev
 
@@ -96,6 +96,9 @@ jobs:
           cp -r config "$PKG_DIR/"
           cp -r data "$PKG_DIR/"
           cp README.md "$PKG_DIR/"
+          # 清理 macOS 系统垃圾文件
+          find "$PKG_DIR" -name ".DS_Store" -delete
+          find "$PKG_DIR" -name "._*" -delete
           tar czf "${{ env.BINARY_NAME }}-${{ matrix.pkg-arch }}.tar.gz" "$PKG_DIR/"
           rm -rf "$PKG_DIR"
 

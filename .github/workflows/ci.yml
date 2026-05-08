@@ -24,6 +24,15 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: 安装 OpenCL 依赖
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            ocl-icd-opencl-dev \
+            opencl-c-headers \
+            pkg-config \
+            libssl-dev
+
       - name: 缓存 Cargo 依赖
         uses: Swatinem/rust-cache@v2
 
@@ -49,7 +58,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
             ocl-icd-opencl-dev \
-            opencl-headers \
+            opencl-c-headers \
             pkg-config \
             libssl-dev
 
@@ -59,11 +68,32 @@ jobs:
       - name: 编译（debug）
         run: cargo build --all-targets
 
-      - name: 运行单元测试
+      - name: 运行单元测试（跳过 GPU 测试）
         run: cargo test --lib -- --nocapture
 
       - name: 编译（release）
         run: cargo build --release
+
+      - name: 验证 Release 产物
+        run: |
+          BIN="target/release/decrypt-btc"
+          test -f "$BIN" && echo "✓ 二进制文件存在"
+          file "$BIN" | grep -q "ELF" && echo "✓ 二进制格式正确"
+          $BIN --help > /dev/null 2>&1 && echo "✓ 二进制可执行"
+
+      - name: 测试打包结构完整性
+        run: |
+          PKG_DIR="/tmp/pkg-verify"
+          mkdir -p "$PKG_DIR"
+          cp target/release/decrypt-btc "$PKG_DIR/"
+          cp -r config "$PKG_DIR/"
+          cp -r data "$PKG_DIR/"
+          cp README.md "$PKG_DIR/"
+          # 验证必需文件
+          for f in decrypt-btc config/example.yaml data/english.txt README.md; do
+            test -f "$PKG_DIR/$f" && echo "✓ $f" || (echo "✗ 缺少 $f"; exit 1)
+          done
+          echo "✓ 打包结构验证通过"
 
   # ─────────────────────────────── macOS 编译 ───────────────────────────────
   build-macos:

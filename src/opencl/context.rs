@@ -121,7 +121,12 @@ impl OpenCLContext {
 mod tests {
     use super::*;
 
+    /// 测试 OpenCL 上下文创建。
+    ///
+    /// 注意：此测试需要真实的 GPU/OpenCL 设备才能通过。
+    /// 在 CI 环境（如 GitHub Actions）中默认跳过，可通过 `--include-ignored` 手动运行。
     #[test]
+    #[ignore = "需要真实的 OpenCL 设备（GPU）"]
     fn test_context_creation() {
         let ctx = OpenCLContext::new();
         assert!(ctx.is_ok());
