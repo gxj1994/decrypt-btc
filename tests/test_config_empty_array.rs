@@ -38,8 +38,8 @@ fn test_empty_array_means_all_2048_words() {
     assert_eq!(candidates[1].len(), 2, "应该使用配置的2个候选词");
 
     // 验证其他位置应该有1个候选词
-    for i in 2..12 {
-        assert_eq!(candidates[i].len(), 1, "位置 {} 应该有1个候选词", i);
+    for (i, c) in candidates.iter().enumerate().skip(2) {
+        assert_eq!(c.len(), 1, "位置 {} 应该有1个候选词", i);
     }
 
     // 计算搜索空间
@@ -74,8 +74,8 @@ fn test_config_key_format_word0_to_word11() {
 
     // 验证所有位置都有1个候选词
     assert_eq!(candidates.len(), 12);
-    for i in 0..12 {
-        assert_eq!(candidates[i].len(), 1, "位置 {} 应该有1个候选词", i);
+    for (i, c) in candidates.iter().enumerate() {
+        assert_eq!(c.len(), 1, "位置 {} 应该有1个候选词", i);
     }
 
     println!("✅ 配置键名格式测试通过");

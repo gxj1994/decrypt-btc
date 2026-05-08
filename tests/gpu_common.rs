@@ -95,17 +95,17 @@ pub fn create_test_config_with_candidates(
 
     let mut word_positions = HashMap::new();
 
-    for i in 0..mnemonic_size {
+    for (i, word) in correct_words.iter().enumerate() {
         let key = format!("word{}", i); // 0-based格式
 
         if let Some(pos) = wrong_positions.iter().position(|&x| x == i) {
             // 这个位置包含正确词 + 干扰词
             let mut candidates = wrong_words[pos].clone();
-            candidates.push(correct_words[i].to_string());
+            candidates.push(word.to_string());
             word_positions.insert(key, candidates);
         } else {
             // 这个位置只有正确词
-            word_positions.insert(key, vec![correct_words[i].to_string()]);
+            word_positions.insert(key, vec![word.to_string()]);
         }
     }
 
