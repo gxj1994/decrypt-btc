@@ -126,7 +126,10 @@ mod tests {
     /// 需要启用 `gpu-tests` feature 才会运行（需要真实的 OpenCL 设备）。
     /// 用法: `cargo test --features gpu-tests`
     #[test]
-    #[cfg_attr(not(feature = "gpu-tests"), ignore = "需要 GPU 设备: cargo test --features gpu-tests")]
+    #[cfg_attr(
+        not(feature = "gpu-tests"),
+        ignore = "需要 GPU 设备: cargo test --features gpu-tests"
+    )]
     fn test_context_creation() {
         let ctx = OpenCLContext::new();
         assert!(ctx.is_ok());
