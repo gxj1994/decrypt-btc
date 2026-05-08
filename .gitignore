@@ -1,5 +1,7 @@
 /target
 /doc
 Cargo.lock
+.idea/
 .DS_Store
 .env
+.vscode
