@@ -75,6 +75,7 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}${{ matrix.suffix }} "$PKG_DIR/"
           cp -r config "$PKG_DIR/"
           cp -r data "$PKG_DIR/"
+          cp -r kernels "$PKG_DIR/"
           cp README.md "$PKG_DIR/"
           # 清理 macOS 系统垃圾文件
           find "$PKG_DIR" -name ".DS_Store" -delete
