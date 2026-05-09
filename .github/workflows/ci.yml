@@ -91,6 +91,7 @@ jobs:
           cp target/release/decrypt-btc "$PKG_DIR/"
           cp -r config "$PKG_DIR/"
           cp -r data "$PKG_DIR/"
+          cp -r kernels "$PKG_DIR/"
           cp README.md "$PKG_DIR/"
           # 验证必需文件
           for f in decrypt-btc config/example.yaml data/english.txt README.md; do
