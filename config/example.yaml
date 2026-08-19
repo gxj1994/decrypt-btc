@@ -17,18 +17,19 @@ passwords: ["123456789"]
 # 空数组 [] 表示使用全部2048个BIP39单词
 # 配置示例: ["kind", "tennis", "able", "endless"]
 word_positions:
-  word0: []   # 第1位助记词候选列表
-  word1: ["endless"]   # 第2位助记词候选列表
-  word2: ["there"]   # 第3位助记词候选列表
-  word3: ["vote"]         # 第4位助记词候选列表
-  word4: ["hawk"]   # 第5位助记词候选列表
-  word5: ["derive"]   # 第6位助记词候选列表
-  word6: ["remind"]   # 第7位助记词候选列表
-  word7: ["mandate"]   # 第8位助记词候选列表
-  word8: ["couch"]   # 第9位助记词候选列表
-  word9: ["okay"]   # 第10位助记词候选列表
-  word10: ["gate"]  # 第11位助记词候选列表
-  word11: ["grief"]  # 第12位助记词候选列表（会被校验位过滤）
+  word0: [] # 第1位助记词候选列表
+  word1: ["endless"] # 第2位助记词候选列表
+  word2: ["there"] # 第3位助记词候选列表
+  word3: ["vote"] # 第4位助记词候选列表
+  word4: ["hawk"] # 第5位助记词候选列表
+  word5: ["derive"] # 第6位助记词候选列表
+  word6: ["remind"] # 第7位助记词候选列表
+  word7: ["mandate"] # 第8位助记词候选列表
+  word8: ["couch"] # 第9位助记词候选列表
+  word9: ["okay"] # 第10位助记词候选列表
+  word10: ["gate"] # 第11位助记词候选列表
+  word11: ["grief"] # 第12位助记词候选列表（会被校验位过滤）
+
 
 # 说明：
 # 1. 根据线索配置高概率的候选词
