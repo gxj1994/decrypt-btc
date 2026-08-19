@@ -229,7 +229,7 @@ GPU执行时间: 0.412 秒
 cargo test
 
 # 运行特定测试
-cargo test --test test_gpu_search
+cargo test --features gpu-tests
 
 # 查看详细输出
 cargo test -- --nocapture

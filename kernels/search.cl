@@ -1,8 +1,14 @@
-// BTC Legacy 地址搜索主内核
+// BTC 地址搜索主内核（支持 4 种地址类型）
 // 完整实现GPU内的BIP39助记词到BTC地址的转换和匹配
-// 流程: 助记词索引 → 助记词字符串 → PBKDF2 → 种子 → BIP32派生 → 私钥 → 公钥 → HASH160 → 地址
+// 流程: 助记词索引 → 助记词字符串 → PBKDF2 → 种子 → BIP32派生 → 私钥 → 公钥 → 地址匹配
 // 整合所有加密算法：SHA256, RIPEMD160, SHA512, PBKDF2, secp256k1, BIP32
 // 集成BIP39校验位验证（减少93.75%无效计算）
+//
+// 地址类型由编译期宏 ADDRESS_TYPE 决定（与 Rust 端 AddressType::as_u8() 一致）:
+//   0 = Taproot       (BIP86, m/86'/0'/0'/0/0, bech32m, 比较32字节输出公钥X坐标)
+//   1 = Legacy        (BIP44, m/44'/0'/0'/0/0, Base58Check, 比较HASH160公钥)
+//   2 = Nested SegWit (BIP49, m/49'/0'/0'/0/0, Base58Check, 比较HASH160(0x0014||HASH160公钥))
+//   3 = Native SegWit (BIP84, m/84'/0'/0'/0/0, bech32, 比较HASH160公钥)
 
 // 注意：所有依赖内核文件在Rust端合并，不需要#include
 // #include "crypto/sha256.cl"
@@ -19,6 +25,10 @@
 #define MNEMONIC_SIZE 12  // 可配置: 12/15/18/21/24
 #endif
 
+#ifndef ADDRESS_TYPE
+#define ADDRESS_TYPE 1  // 默认Legacy: 0=Taproot, 1=Legacy, 2=Nested SegWit, 3=Native SegWit
+#endif
+
 // 注意：local_mnemonic_t 已在 mnemonic.cl 中定义
 
 // 辅助函数：HASH160 = RIPEMD160(SHA256(data))
@@ -28,10 +38,30 @@ void hash160(const uchar* data, uint data_len, uchar output[20]) {
     ripemd160(sha256_result, 32, output);
 }
 
+// BIP340 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || data)
+// 用于 BIP341 Taproot 密钥路径调整: t = tagged_hash("TapTweak", x_only_pubkey)
+// 注意: "TapTweak" 恰好8字节，tag数组必须恰好8元素，否则C会零填充导致哈希错值
+void tagged_hash_tap_tweak(const uchar* data, uint data_len, uchar output[32]) {
+    uchar tag[8] = {'T', 'a', 'p', 'T', 'w', 'e', 'a', 'k'};
+    uchar tag_hash[32];
+    sha256(tag, 8, tag_hash);
+
+    // buf = tag_hash || tag_hash || data
+    uchar buf[96];
+    for (int i = 0; i < 32; i++) {
+        buf[i] = tag_hash[i];
+        buf[32 + i] = tag_hash[i];
+    }
+    for (uint i = 0; i < data_len; i++) {
+        buf[64 + i] = data[i];
+    }
+    sha256(buf, 64 + data_len, output);
+}
+
 // 主内核函数
 __kernel void btc_address_search(
     __global const uint* word_indices,      // 每个位置的候选词索引
-    __constant const uchar* target_hash,    // 目标公钥哈希(20字节)
+    __constant const uchar* target_hash,    // 目标哈希(32字节缓冲区: Taproot用满32字节, 其余类型前20字节有效)
     __global const uchar* salt,             // 预计算的salt ("mnemonic" + passphrase)
     uint salt_len,                          // salt长度
     __global uint* result_buffer,           // 结果缓冲区
@@ -102,9 +132,9 @@ __kernel void btc_address_search(
     // 调用PBKDF2
     pbkdf2_hmac_sha512(mnemonic_str, mnemonic_len, salt_local, salt_len, 2048, seed.bytes, 64);
     
-    // 步骤4: BIP32派生私钥 (m/44'/0'/0'/0/0)
+    // 步骤4: BIP32派生私钥 (路径由ADDRESS_TYPE决定: 86'/44'/49'/84')
     uchar private_key[32];
-    derive_path(&seed, DERIVATION_PATH, 5, private_key);
+    derive_path(&seed, &DERIVATION_PATHS[ADDRESS_TYPE][0], 5, private_key);
     
     // 步骤5: secp256k1 计算公钥
     uchar public_key_uncompressed[65];
@@ -121,8 +151,63 @@ __kernel void btc_address_search(
     uchar pubkey_hash[20];
     hash160(compressed_key, 33, pubkey_hash);
     
-    // 步骤7: 对比目标哈希
-    // 步骤7: 对比目标哈希
+    // 步骤7: 按地址类型对比目标哈希
+#if ADDRESS_TYPE == 0
+    // Taproot (BIP86): 输出密钥 Q = P + t*G，其中 t = tagged_hash("TapTweak", X(P))
+    // 匹配目标 = Q 的 X 坐标 (32字节，bech32m witness v1 program)
+    uchar x_only_pubkey[32];
+    for (int i = 0; i < 32; i++) {
+        x_only_pubkey[i] = public_key_uncompressed[1 + i];  // 取公钥X坐标
+    }
+
+    uchar tweak[32];
+    tagged_hash_tap_tweak(x_only_pubkey, 32, tweak);
+
+    // t*G（返回65字节无压缩点: 0x04 || X || Y）
+    uchar tweak_point[65];
+    scalar_mult_base_jacobian_windowed(tweak, tweak_point);
+
+    // Q = P + t*G（仿射点加法）
+    point p_point, t_point, q_point;
+    mp_from_bytes(&public_key_uncompressed[1], &p_point.x);   // P.X
+    mp_from_bytes(&public_key_uncompressed[33], &p_point.y);  // P.Y
+    mp_from_bytes(&tweak_point[1], &t_point.x);               // (t*G).X
+    mp_from_bytes(&tweak_point[33], &t_point.y);              // (t*G).Y
+    point_add(&q_point, &p_point, &t_point);
+
+    // 输出密钥的X坐标 = 目标program (32字节)
+    uchar output_key[32];
+    mp_to_bytes(&q_point.x, output_key);
+
+    bool match = true;
+    for (int i = 0; i < 32; i++) {
+        if (output_key[i] != target_hash[i]) {
+            match = false;
+            break;
+        }
+    }
+#elif ADDRESS_TYPE == 2
+    // Nested SegWit (BIP49): P2SH-P2WPKH
+    // scriptPubKey = HASH160(witness_script)，witness_script = 0x0014 || pubkey_hash
+    uchar witness_script[22];
+    witness_script[0] = 0x00;  // OP_0 (witness v0)
+    witness_script[1] = 0x14;  // 20字节推入
+    for (int i = 0; i < 20; i++) {
+        witness_script[2 + i] = pubkey_hash[i];
+    }
+
+    uchar script_hash[20];
+    hash160(witness_script, 22, script_hash);
+
+    bool match = true;
+    for (int i = 0; i < 20; i++) {
+        if (script_hash[i] != target_hash[i]) {
+            match = false;
+            break;
+        }
+    }
+#else
+    // Legacy (BIP44, P2PKH) / Native SegWit (BIP84, P2WPKH): 匹配HASH160(压缩公钥)
     bool match = true;
     for (int i = 0; i < 20; i++) {
         if (pubkey_hash[i] != target_hash[i]) {
@@ -130,6 +215,7 @@ __kernel void btc_address_search(
             break;
         }
     }
+#endif
     
     // 如果匹配，记录结果
     if (match) {

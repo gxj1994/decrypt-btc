@@ -3,10 +3,23 @@
 # 助记词长度（支持: 12/15/18/21/24）
 mnemonic_size: 12
 
-# 目标BTC地址（Legacy格式，以1开头）
-# tennis endless there vote hawk derive remind mandate couch okay gate grief
-# 1QJake1yux7tfd3h3QmG2irziqizb5u1XN/1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gN
-target_address: "1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gN"
+# 目标BTC地址（支持4种类型，程序按地址格式自动检测，无需配置类型）
+# 助记词: tennis endless there vote hawk derive remind mandate couch okay gate grief
+# 无密码派生地址:
+#   Taproot (BIP86): bc1pj5q0903ldyw4gtqhd8dfyf5raut5qq4v7z0takv3632yhf7pgq4qymknv3
+#   Legacy  (BIP44): 1QJake1yux7tfd3h3QmG2irziqizb5u1XN
+# 带密码 "123456789" 派生地址 (BIP44/49/84/86, m/x'/0'/0'/0/0):
+#   Legacy        (BIP44): 1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gN
+#   Nested SegWit (BIP49): 3EA5yAVMJZ6kVec9sSRry8QnvSQ3JH5agb
+#   Native SegWit (BIP84): bc1qnkcft6kattm6mnju9n7p3qlppyy23r2t3semfg
+#   Taproot       (BIP86): bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7
+# 其他参考示例地址:
+#   Nested SegWit: 3BSruDfveoFrFG5LSfW77CJcN61ARoMHZj
+#   Native SegWit: bc1q5tgrcty99d7d7muxl6kk3xkmkm32c30kn3cyza
+target_address: "bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7"
+
+# 地址类型自动检测规则（无需手动指定）:
+# bc1p→Taproot, 1→Legacy, 3→Nested SegWit, bc1q→Native SegWit
 
 # 密码列表（可选）
 # 空数组 [] 表示不使用密码

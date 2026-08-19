@@ -52,10 +52,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let candidates = generator.build_candidates(&config)?;
 
     let search_space = CandidateGenerator::calculate_search_space(&candidates);
-    info!(
-        "Total search space: {:.2e} combinations",
-        search_space as f64
-    );
 
     // 检查搜索空间是否超过限制
     if args.max_search_space > 0 && search_space > args.max_search_space {
@@ -117,15 +113,14 @@ fn run_gpu_search(
     info!("GPU执行时间: {:.3} 秒", stats.execution_secs);
     info!("总耗时: {:.3} 秒", stats.elapsed_secs);
     info!("总尝试次数: {} 次", stats.total_attempts);
-    info!("搜索速度: {:.0} H/s", stats.attempts_per_second);
-
-    if stats.attempts_per_second > 1000.0 && stats.attempts_per_second < 1000000.0 {
-        info!("搜索速度: {:.2} KH/s", stats.attempts_per_second / 1000.0);
-    } else if stats.attempts_per_second >= 1000000.0 {
-        info!(
-            "搜索速度: {:.2} MH/s",
-            stats.attempts_per_second / 1000000.0
-        );
+    // 自适应单位：≥1M 用 MH/s，≥1K 用 KH/s，否则 H/s（单行输出）
+    let aps = stats.attempts_per_second;
+    if aps >= 1_000_000.0 {
+        info!("搜索速度: {:.2} MH/s", aps / 1_000_000.0);
+    } else if aps >= 1_000.0 {
+        info!("搜索速度: {:.2} KH/s", aps / 1_000.0);
+    } else {
+        info!("搜索速度: {:.0} H/s", aps);
     }
 
     if stats.total_attempts > 0 && stats.execution_secs > 0.0 {

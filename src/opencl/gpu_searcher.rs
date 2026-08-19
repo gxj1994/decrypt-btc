@@ -4,7 +4,7 @@
 use log::{debug, info};
 use ocl::{Buffer, Context, Device, Kernel, Platform, Program, Queue, SpatialDims};
 
-use crate::config::Config;
+use crate::config::{AddressType, Config};
 
 /// GPU搜索结果
 #[derive(Debug, Clone)]
@@ -34,6 +34,7 @@ pub struct GpuSearcher {
     result_buffer: Buffer<u32>,
     flag_buffer: Buffer<u32>, // 统计计数器（改为u32类型）
     mnemonic_size: usize,
+    address_type: AddressType, // 目标地址类型（决定内核ADDRESS_TYPE宏与派生路径）
     salt_len: u32,             // salt长度
     pub stats: GpuSearchStats, // 性能统计
 }
@@ -130,12 +131,14 @@ impl GpuSearcher {
 
         let queue = Queue::new(&context, device, None)?;
 
-        // 3. 编译内核程序（传入mnemonic_size）
-        let program = Self::compile_kernel_program(&context, config.mnemonic_size)?;
-
-        // 4. 预计算目标哈希（优化：在初始化时上传，避免每次search重复上传）
-        let target_hash = Self::decode_target_address_static(&config.target_address)?;
+        // 3. 解码目标地址 → 32字节目标哈希 + 地址类型（自动检测）
+        let (target_hash, address_type) =
+            Self::decode_target_address_static(&config.target_address)?;
+        info!("[GPU] 目标地址类型: {}（内核 ADDRESS_TYPE={}）", address_type, address_type.as_u8());
         debug!("[GPU] 目标哈希已预计算: {:?}", &target_hash[..8]);
+
+        // 4. 编译内核程序（传入mnemonic_size和address_type）
+        let program = Self::compile_kernel_program(&context, config.mnemonic_size, address_type)?;
 
         let result_size = 1024; // 结果缓冲区大小
         let result_buffer = Buffer::<u32>::builder()
@@ -168,11 +171,11 @@ impl GpuSearcher {
             .len(max_word_indices_size)
             .build()?;
 
-        // 创建target_hash缓冲区（20字节）
+        // 创建target_hash缓冲区（32字节：Taproot用满32字节，其余类型前20字节有效）
         let target_hash_buffer = Buffer::<u8>::builder()
             .queue(queue.clone())
             .flags(ocl::flags::MEM_READ_ONLY)
-            .len(20)
+            .len(32)
             .build()?;
 
         // 初始化时即上传目标哈希（优化2）
@@ -211,6 +214,7 @@ impl GpuSearcher {
             result_buffer,
             flag_buffer,
             mnemonic_size,
+            address_type,
             salt_len: 0,
             stats: GpuSearchStats {
                 total_attempts: 0,
@@ -232,6 +236,7 @@ impl GpuSearcher {
             || name_lower.contains("nvidia")
             || name_lower.contains("amd")
             || name_lower.contains("radeon")
+            || name_lower.contains("apple")
         {
             Ok("GPU".to_string())
         } else if name_lower.contains("cpu") {
@@ -245,11 +250,20 @@ impl GpuSearcher {
     fn compile_kernel_program(
         context: &Context,
         mnemonic_size: usize,
+        address_type: AddressType,
     ) -> Result<Program, Box<dyn std::error::Error>> {
-        debug!("[GPU] 编译内核程序 (MNEMONIC_SIZE={})...", mnemonic_size);
+        debug!(
+            "[GPU] 编译内核程序 (MNEMONIC_SIZE={}, ADDRESS_TYPE={})...",
+            mnemonic_size,
+            address_type.as_u8()
+        );
 
-        // 添加MNEMONIC_SIZE宏定义
-        let mut source = format!("#define MNEMONIC_SIZE {}\n\n", mnemonic_size);
+        // 添加MNEMONIC_SIZE与ADDRESS_TYPE宏定义
+        let mut source = format!(
+            "#define MNEMONIC_SIZE {}\n#define ADDRESS_TYPE {}\n\n",
+            mnemonic_size,
+            address_type.as_u8()
+        );
 
         // 按顺序加载所有内核文件
         let kernel_files = vec![
@@ -287,7 +301,11 @@ impl GpuSearcher {
     ) -> Result<Vec<GpuSearchResult>, Box<dyn std::error::Error>> {
         use std::time::Instant;
 
-        debug!("[GPU] 开始搜索...");
+        debug!(
+            "[GPU] 开始搜索... 地址类型: {} (ADDRESS_TYPE={})",
+            self.address_type,
+            self.address_type.as_u8()
+        );
         let search_start = Instant::now();
 
         // 1. 准备助记词索引数据（使用预生成的candidates或从config构建）
@@ -391,26 +409,74 @@ impl GpuSearcher {
         Ok(results)
     }
 
-    /// 解码目标地址为哈希（静态方法，用于初始化时预计算）
-    fn decode_target_address_static(address: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        use crate::address::base58check_decode;
+    /// 解码目标地址为32字节目标哈希 + 地址类型（静态方法，用于初始化时预计算）
+    ///
+    /// 使用 bitcoin 库严格解析（Base58Check/bech32/bech32m checksum + 主网网络），
+    /// 按 payload 类型自动检测地址类型并提取对应匹配目标：
+    /// - Taproot (witness v1): 32字节 program 填满缓冲区
+    /// - Native SegWit (witness v0): 20字节 program 放缓冲区前20字节
+    /// - Legacy (P2PKH) / Nested SegWit (P2SH): 20字节哈希放缓冲区前20字节
+    /// 缓冲区其余字节保持 0（内核比较循环从索引0开始，长度由类型决定）。
+    fn decode_target_address_static(
+        address: &str,
+    ) -> Result<(Vec<u8>, AddressType), Box<dyn std::error::Error>> {
+        use bitcoin::address::Payload;
+        use bitcoin::hashes::Hash; // trait: PubkeyHash/ScriptHash 的 as_byte_array/to_byte_array
+        use bitcoin::{Address, Network};
+        use std::str::FromStr;
 
-        // 使用Base58Check解码Legacy地址，提取pubkey_hash（20字节）
-        let pubkey_hash = base58check_decode(address)?;
+        // 严格解析：Base58Check / bech32 / bech32m checksum 全验证
+        let addr = Address::from_str(address)
+            .map_err(|_| format!("无效的BTC地址: {}", address))?;
 
-        if pubkey_hash.len() != 20 {
-            return Err(format!(
-                "Legacy地址pubkey_hash长度应为20字节，实际为{}字节",
-                pubkey_hash.len()
-            )
-            .into());
-        }
+        // 仅接受比特币主网地址
+        let addr = addr
+            .require_network(Network::Bitcoin)
+            .map_err(|_| format!("无效的BTC地址（非主网）: {}", address))?;
+
+        let mut target_hash = vec![0u8; 32];
+        let address_type = match addr.payload {
+            Payload::PubkeyHash(h) => {
+                target_hash[..20].copy_from_slice(h.as_byte_array());
+                AddressType::Legacy
+            }
+            Payload::ScriptHash(h) => {
+                target_hash[..20].copy_from_slice(h.as_byte_array());
+                AddressType::NestedSegWit
+            }
+            Payload::WitnessProgram(wp) => {
+                let program = wp.program().as_bytes();
+                if program.len() > 32 {
+                    return Err(format!(
+                        "witness program 长度超过32字节: {}",
+                        address
+                    )
+                    .into());
+                }
+                // program 放缓冲区前部（内核比较从索引0开始）
+                target_hash[..program.len()].copy_from_slice(program);
+                match wp.version() {
+                    bitcoin::address::WitnessVersion::V0 => AddressType::NativeSegWit,
+                    bitcoin::address::WitnessVersion::V1 => AddressType::Taproot,
+                    _ => {
+                        return Err(format!(
+                            "不支持的witness版本: {}",
+                            address
+                        )
+                        .into())
+                    }
+                }
+            }
+            // Payload 为 non_exhaustive，未来新增变体时兜底拒绝
+            _ => return Err(format!("不支持的地址payload类型: {}", address).into()),
+        };
 
         debug!(
-            "[GPU] Base58Check解码成功，pubkey_hash: {:02x?}",
-            &pubkey_hash[..8]
+            "[GPU] 地址解码成功，类型={}，目标哈希前8字节: {:02x?}",
+            address_type,
+            &target_hash[..8]
         );
-        Ok(pubkey_hash)
+        Ok((target_hash, address_type))
     }
 
     /// 准备助记词索引数组
@@ -604,6 +670,67 @@ impl GpuSearcher {
 
 impl Drop for GpuSearcher {
     fn drop(&mut self) {
-        info!("[GPU] 释放GPU资源");
+        debug!("[GPU] 释放GPU资源");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_decode_target_address_all_four_types() {
+        // Taproot: 32字节program填满缓冲区，与bitcoin crate解析结果一致
+        let (hash, ty) = GpuSearcher::decode_target_address_static(
+            "bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7",
+        )
+        .expect("Taproot地址解码失败");
+        assert_eq!(ty, AddressType::Taproot);
+        assert_eq!(hash.len(), 32);
+        let addr = bitcoin::Address::from_str(
+            "bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7",
+        )
+        .unwrap()
+        .require_network(bitcoin::Network::Bitcoin)
+        .unwrap();
+        match addr.payload {
+            bitcoin::address::Payload::WitnessProgram(wp) => {
+                assert_eq!(&hash[..], wp.program().as_bytes());
+            }
+            _ => panic!("应为WitnessProgram"),
+        }
+
+        // Legacy: 前20字节有效，后12字节补零
+        let (hash, ty) =
+            GpuSearcher::decode_target_address_static("1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gN")
+                .expect("Legacy地址解码失败");
+        assert_eq!(ty, AddressType::Legacy);
+        assert!(hash[20..32].iter().all(|&b| b == 0));
+
+        // Nested SegWit
+        let (hash, ty) =
+            GpuSearcher::decode_target_address_static("3EA5yAVMJZ6kVec9sSRry8QnvSQ3JH5agb")
+                .expect("Nested SegWit地址解码失败");
+        assert_eq!(ty, AddressType::NestedSegWit);
+        assert!(hash[20..32].iter().all(|&b| b == 0));
+
+        // Native SegWit
+        let (hash, ty) =
+            GpuSearcher::decode_target_address_static("bc1qnkcft6kattm6mnju9n7p3qlppyy23r2t3semfg")
+                .expect("Native SegWit地址解码失败");
+        assert_eq!(ty, AddressType::NativeSegWit);
+        assert!(hash[20..32].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_decode_target_address_rejects_invalid() {
+        // 完全非法字符串
+        assert!(GpuSearcher::decode_target_address_static("not-an-address").is_err());
+        assert!(GpuSearcher::decode_target_address_static("").is_err());
+        // 格式合法但非主网（testnet）地址
+        assert!(GpuSearcher::decode_target_address_static("mfcHP2WMCVLsVZA8yrovmhMgxNFW9r98xw").is_err());
+        // checksum错误
+        assert!(GpuSearcher::decode_target_address_static("1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gM").is_err());
     }
 }

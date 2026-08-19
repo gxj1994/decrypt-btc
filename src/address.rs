@@ -4,8 +4,10 @@
 use bip39::Mnemonic;
 use bitcoin::bip32::{DerivationPath, ExtendedPrivKey};
 use bitcoin::{Address, Network};
-use secp256k1::Secp256k1;
+use secp256k1::{Secp256k1, XOnlyPublicKey};
 use std::str::FromStr;
+
+use crate::config::AddressType;
 
 /// 从助记词生成BIP39种子
 pub fn mnemonic_to_seed(mnemonic: &str, passphrase: &str) -> [u8; 64] {
@@ -18,6 +20,19 @@ pub fn mnemonic_to_address(
     mnemonic: &str,
     passphrase: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    mnemonic_to_address_by_type(mnemonic, passphrase, AddressType::Legacy)
+}
+
+/// 从助记词按地址类型生成BTC地址
+/// - Taproot:       BIP86 (m/86'/0'/0'/0/0, P2TR)
+/// - Legacy:        BIP44 (m/44'/0'/0'/0/0, P2PKH)
+/// - NestedSegWit:  BIP49 (m/49'/0'/0'/0/0, P2SH-P2WPKH)
+/// - NativeSegWit:  BIP84 (m/84'/0'/0'/0/0, P2WPKH)
+pub fn mnemonic_to_address_by_type(
+    mnemonic: &str,
+    passphrase: &str,
+    address_type: AddressType,
+) -> Result<String, Box<dyn std::error::Error>> {
     // Step 1: 解析助记词
     let mnemonic_obj = Mnemonic::parse(mnemonic)?;
 
@@ -28,15 +43,31 @@ pub fn mnemonic_to_address(
     let secp = Secp256k1::new();
     let master_key = ExtendedPrivKey::new_master(Network::Bitcoin, &seed)?;
 
-    // Step 4: BIP32 derivation path m/44'/0'/0'/0/0
-    let path = DerivationPath::from_str("m/44'/0'/0'/0/0")?;
+    // Step 4: BIP32派生路径 (purpose由地址类型决定: 44'/49'/84'/86')
+    let purpose = match address_type {
+        AddressType::Taproot => 86,
+        AddressType::Legacy => 44,
+        AddressType::NestedSegWit => 49,
+        AddressType::NativeSegWit => 84,
+    };
+    let path = DerivationPath::from_str(&format!("m/{}'/0'/0'/0/0", purpose))?;
     let derived_key = master_key.derive_priv(&secp, &path)?;
 
     // Step 5: 公钥
     let public_key = derived_key.to_priv().public_key(&secp);
 
-    // Step 6: 生成Legacy地址 (P2PKH)
-    let address = Address::p2pkh(&public_key, Network::Bitcoin);
+    // Step 6: 按类型生成地址
+    let address = match address_type {
+        // Taproot: 内部密钥取x-only公钥（BIP341密钥路径支出，无脚本树）
+        AddressType::Taproot => {
+            // bitcoin::PublicKey.inner 为 secp256k1::PublicKey（压缩公钥）
+            let xonly = XOnlyPublicKey::from(public_key.inner);
+            Address::p2tr(&secp, xonly, None, Network::Bitcoin)
+        }
+        AddressType::Legacy => Address::p2pkh(&public_key, Network::Bitcoin),
+        AddressType::NestedSegWit => Address::p2shwpkh(&public_key, Network::Bitcoin)?,
+        AddressType::NativeSegWit => Address::p2wpkh(&public_key, Network::Bitcoin)?,
+    };
 
     Ok(address.to_string())
 }
@@ -120,5 +151,82 @@ mod tests {
         println!("地址: {}", address);
 
         assert!(address.starts_with('1'));
+    }
+
+    #[test]
+    fn test_mnemonic_to_address_by_type_passphrase_known_vectors() {
+        // 谜题助记词 + 密码"123456789"（与config/example.yaml注释一致，已用bip_utils交叉验证）
+        let mnemonic = "tennis endless there vote hawk derive remind mandate couch okay gate grief";
+        let cases = [
+            (AddressType::Legacy, "1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gN"),
+            (
+                AddressType::NestedSegWit,
+                "3EA5yAVMJZ6kVec9sSRry8QnvSQ3JH5agb",
+            ),
+            (
+                AddressType::NativeSegWit,
+                "bc1qnkcft6kattm6mnju9n7p3qlppyy23r2t3semfg",
+            ),
+            (
+                AddressType::Taproot,
+                "bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7",
+            ),
+        ];
+
+        for (address_type, expected) in cases {
+            let address = mnemonic_to_address_by_type(mnemonic, "123456789", address_type)
+                .expect("地址生成失败");
+            assert_eq!(
+                address, expected,
+                "{} 带密码派生地址不匹配",
+                address_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_mnemonic_to_address_by_type_no_passphrase_known_vectors() {
+        // 谜题助记词 无密码版本（BIP44/BIP86）
+        let mnemonic = "tennis endless there vote hawk derive remind mandate couch okay gate grief";
+
+        assert_eq!(
+            mnemonic_to_address_by_type(mnemonic, "", AddressType::Legacy).unwrap(),
+            "1QJake1yux7tfd3h3QmG2irziqizb5u1XN"
+        );
+        assert_eq!(
+            mnemonic_to_address_by_type(mnemonic, "", AddressType::Taproot).unwrap(),
+            "bc1pj5q0903ldyw4gtqhd8dfyf5raut5qq4v7z0takv3632yhf7pgq4qymknv3"
+        );
+    }
+
+    #[test]
+    fn test_mnemonic_to_address_by_type_bip39_standard_vectors() {
+        // BIP39标准测试向量 abandon...about（无密码，4种类型，广泛引用的已知地址）
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let cases = [
+            (AddressType::Legacy, "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA"),
+            (
+                AddressType::NestedSegWit,
+                "37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf",
+            ),
+            (
+                AddressType::NativeSegWit,
+                "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+            ),
+            (
+                AddressType::Taproot,
+                "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
+            ),
+        ];
+
+        for (address_type, expected) in cases {
+            let address = mnemonic_to_address_by_type(mnemonic, "", address_type)
+                .expect("地址生成失败");
+            assert_eq!(
+                address, expected,
+                "{} BIP39标准向量地址不匹配",
+                address_type
+            );
+        }
     }
 }
