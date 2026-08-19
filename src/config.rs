@@ -208,8 +208,8 @@ pub fn detect_address_type(address: &str) -> Result<AddressType, ConfigError> {
     use std::str::FromStr;
 
     // 严格解析：Base58Check / bech32 / bech32m checksum 全验证
-    let addr = Address::from_str(address)
-        .map_err(|_| ConfigError::InvalidAddress(address.to_string()))?;
+    let addr =
+        Address::from_str(address).map_err(|_| ConfigError::InvalidAddress(address.to_string()))?;
 
     // 仅接受比特币主网地址
     let addr = addr
@@ -285,10 +285,8 @@ mod tests {
     fn test_detect_address_type_all_four_types() {
         // Taproot（bech32m, witness v1）
         assert_eq!(
-            detect_address_type(
-                "bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7"
-            )
-            .unwrap(),
+            detect_address_type("bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7")
+                .unwrap(),
             AddressType::Taproot
         );
         // Legacy（Base58Check, P2PKH）
@@ -316,10 +314,7 @@ mod tests {
                 "bc1pnlgec4pd8ekmhsqdzese7jfqsnae9f6cu99m4f0cz877e3lt4v3sv2s4h7",
                 AddressType::Taproot,
             ),
-            (
-                "1KddEkd2fiWuibkSmK1ASBpjpTDjmAZTKs",
-                AddressType::Legacy,
-            ),
+            ("1KddEkd2fiWuibkSmK1ASBpjpTDjmAZTKs", AddressType::Legacy),
             (
                 "3BSruDfveoFrFG5LSfW77CJcN61ARoMHZj",
                 AddressType::NestedSegWit,

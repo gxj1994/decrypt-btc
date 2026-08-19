@@ -134,7 +134,11 @@ impl GpuSearcher {
         // 3. 解码目标地址 → 32字节目标哈希 + 地址类型（自动检测）
         let (target_hash, address_type) =
             Self::decode_target_address_static(&config.target_address)?;
-        info!("[GPU] 目标地址类型: {}（内核 ADDRESS_TYPE={}）", address_type, address_type.as_u8());
+        info!(
+            "[GPU] 目标地址类型: {}（内核 ADDRESS_TYPE={}）",
+            address_type,
+            address_type.as_u8()
+        );
         debug!("[GPU] 目标哈希已预计算: {:?}", &target_hash[..8]);
 
         // 4. 编译内核程序（传入mnemonic_size和address_type）
@@ -426,8 +430,7 @@ impl GpuSearcher {
         use std::str::FromStr;
 
         // 严格解析：Base58Check / bech32 / bech32m checksum 全验证
-        let addr = Address::from_str(address)
-            .map_err(|_| format!("无效的BTC地址: {}", address))?;
+        let addr = Address::from_str(address).map_err(|_| format!("无效的BTC地址: {}", address))?;
 
         // 仅接受比特币主网地址
         let addr = addr
@@ -447,24 +450,14 @@ impl GpuSearcher {
             Payload::WitnessProgram(wp) => {
                 let program = wp.program().as_bytes();
                 if program.len() > 32 {
-                    return Err(format!(
-                        "witness program 长度超过32字节: {}",
-                        address
-                    )
-                    .into());
+                    return Err(format!("witness program 长度超过32字节: {}", address).into());
                 }
                 // program 放缓冲区前部（内核比较从索引0开始）
                 target_hash[..program.len()].copy_from_slice(program);
                 match wp.version() {
                     bitcoin::address::WitnessVersion::V0 => AddressType::NativeSegWit,
                     bitcoin::address::WitnessVersion::V1 => AddressType::Taproot,
-                    _ => {
-                        return Err(format!(
-                            "不支持的witness版本: {}",
-                            address
-                        )
-                        .into())
-                    }
+                    _ => return Err(format!("不支持的witness版本: {}", address).into()),
                 }
             }
             // Payload 为 non_exhaustive，未来新增变体时兜底拒绝
@@ -729,8 +722,14 @@ mod tests {
         assert!(GpuSearcher::decode_target_address_static("not-an-address").is_err());
         assert!(GpuSearcher::decode_target_address_static("").is_err());
         // 格式合法但非主网（testnet）地址
-        assert!(GpuSearcher::decode_target_address_static("mfcHP2WMCVLsVZA8yrovmhMgxNFW9r98xw").is_err());
+        assert!(
+            GpuSearcher::decode_target_address_static("mfcHP2WMCVLsVZA8yrovmhMgxNFW9r98xw")
+                .is_err()
+        );
         // checksum错误
-        assert!(GpuSearcher::decode_target_address_static("1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gM").is_err());
+        assert!(
+            GpuSearcher::decode_target_address_static("1CmoB5NoXyXJX8dSVBkeRazK8Eq5LT27gM")
+                .is_err()
+        );
     }
 }

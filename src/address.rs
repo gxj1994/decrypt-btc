@@ -176,11 +176,7 @@ mod tests {
         for (address_type, expected) in cases {
             let address = mnemonic_to_address_by_type(mnemonic, "123456789", address_type)
                 .expect("地址生成失败");
-            assert_eq!(
-                address, expected,
-                "{} 带密码派生地址不匹配",
-                address_type
-            );
+            assert_eq!(address, expected, "{} 带密码派生地址不匹配", address_type);
         }
     }
 
@@ -220,8 +216,8 @@ mod tests {
         ];
 
         for (address_type, expected) in cases {
-            let address = mnemonic_to_address_by_type(mnemonic, "", address_type)
-                .expect("地址生成失败");
+            let address =
+                mnemonic_to_address_by_type(mnemonic, "", address_type).expect("地址生成失败");
             assert_eq!(
                 address, expected,
                 "{} BIP39标准向量地址不匹配",
